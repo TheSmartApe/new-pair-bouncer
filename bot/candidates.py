@@ -35,12 +35,16 @@ def _epoch(value) -> float | None:
         return None
 
 
-def normalize_pool(raw: dict, chain: str) -> dict:
-    """One /onchain/networks/{chain}/{trending_pools|new_pools|megafilter} row -> a flat candidate dict."""
+def normalize_pool(raw: dict, chain: str | None = None) -> dict:
+    """One /onchain/{...pools...} row -> a flat candidate dict. `chain` is explicit for single-network
+    sources (trending_pools/new_pools); pass None for a source that spans multiple networks in one
+    response (megafilter) and this reads it from the `network` relationship instead."""
     attrs = raw.get("attributes", raw) or {}
     rel = raw.get("relationships") or {}
     token_id = _get(rel, "base_token", "data", "id")
     address = attrs.get("address") or (token_id.split("_", 1)[1] if token_id and "_" in token_id else None)
+    if chain is None:
+        chain = _get(rel, "network", "data", "id") or (token_id.split("_", 1)[0] if token_id and "_" in token_id else "unknown")
     name = attrs.get("name") or ""
     symbol = name.split("/")[0].strip() if "/" in name else name
     txns_h24 = _get(attrs, "transactions", "h24", default={}) or {}

@@ -3,6 +3,7 @@
 rich.Console(record=True) -> save_svg(), then Playwright screenshots the SVG. Needs Playwright installed
 (`uv pip install playwright && playwright install chromium`), same as core.articlekit.
 """
+import time
 from pathlib import Path
 
 from rich.console import Console
@@ -20,6 +21,7 @@ def state_from_run(run_id: str) -> dashboard.DashboardState:
     exited = {d["address"] for d in decisions if d.get("kind") == "decision" and d.get("action") == "exit"}
     open_addrs = [a for a in entries if a not in exited]
 
+    equity_curve = runstore.read_equity_curve(run_dir)
     state = dashboard.DashboardState(
         strategy_name=metrics.get("strategy", run_dir.name),
         environment=metrics.get("environment", "pro"),
@@ -27,7 +29,11 @@ def state_from_run(run_id: str) -> dashboard.DashboardState:
         mode=metrics.get("mode", "forward"),
         scan_count=len(scans),
         credits_used=metrics.get("credits_used", 0),
+        max_credits_per_day=metrics.get("max_credits_per_day"),
         metrics=metrics,
+        equity_curve=equity_curve,
+        interval_s=metrics.get("interval_s", 60),
+        next_scan_ts=time.time() + 42,
     )
     if scans:
         last = scans[-1]
@@ -43,10 +49,12 @@ def state_from_run(run_id: str) -> dashboard.DashboardState:
     state.open_positions = [
         {
             "symbol": entries[a].get("symbol"),
+            "chain": entries[a].get("chain"),
+            "pair": entries[a].get("symbol"),
             "entry_price": entries[a].get("price_usd", 0),
             "price": entries[a].get("price_usd", 0),
             "change_pct": 0.0,
-            "hold_minutes": 0.0,
+            "hold_minutes": round((time.time() - entries[a].get("ts", time.time())) / 60, 1),
         }
         for a in open_addrs
     ]

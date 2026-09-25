@@ -8,26 +8,31 @@ description: >
 
 source:
   type: new_pools     # new_pools | trending | megafilter
-  chain: solana
+  chain: solana        # or `networks: [solana, base]` to scan more than one chain per scan
   n: 20                # candidates pulled per scan
 
-# Tuned against a live spot check of /onchain/networks/solana/new_pools: most candidates from that
-# feed are literally seconds to minutes old, so "24h volume" and "liquidity" are necessarily tiny at
-# that point -- the old thresholds here (liquidity $10k, 24h volume $5k, 20 txns) failed 15-20 of
-# every 20 candidates on liquidity/volume alone and produced zero passes across three separate
-# 3-minute test runs. These are loosened to match what a brand-new pool can realistically show in
-# its first minutes while still screening out the completely dead launches (near-zero liquidity,
-# 1 txn, no real trading yet). If this strategy goes back to 0/20 on a normal market day, check the
-# per-candidate check reasons in data/scans/new-launch-sniff.jsonl before loosening further.
+# Root-caused against live data/scans/new-launch-sniff.jsonl, not just re-guessed thresholds: on a
+# normal market day roughly half of `new_pools` candidates are a few seconds to minutes old, and for
+# those, `reserve_in_usd` (liquidity) and GT Score routinely aren't indexed yet -- token_info can even
+# 404 outright for a pool that young. Before this fix, `check_min` treated that "unknown" the same as
+# "failed", so liquidity/gt_score alone silently zeroed out every candidate regardless of how the
+# volume/txns/honeypot/holder thresholds below were tuned (0/20 across every recorded scan). The real
+# fix is `allow_unknown` below: for THIS strategy specifically (a "sniff the newest pools" strategy,
+# not a safety-first one) liquidity and GT Score log "unknown, allowing" instead of an auto-fail, and
+# the strategy leans on volume/txns/honeypot/holder-concentration -- fields that are populated even on
+# minute-old pools -- to actually screen out dead or unsafe launches. If this strategy goes back to
+# 0/N on a normal market day, check the per-candidate reasons in data/scans/new-launch-sniff.jsonl
+# before loosening further.
 filters:
   max_age_hours: 6
   min_liquidity_usd: 2500
-  min_volume_24h_usd: 300
-  min_txns_24h: 5
-  min_gt_score: 60
+  min_volume_24h_usd: 100
+  min_txns_24h: 3
+  min_gt_score: 55
   no_honeypot: true
-  max_top10_holder_pct: 70
-  max_dev_holding_pct: 15
+  max_top10_holder_pct: 75
+  max_dev_holding_pct: 20
+  allow_unknown: [liquidity, gt_score]
 
 smart_money_gate:
   enabled: false

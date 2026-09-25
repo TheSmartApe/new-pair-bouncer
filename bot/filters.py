@@ -13,11 +13,15 @@ def check_max_age(pool_created_ts: float | None, now_ts: float, max_age_hours: f
     return False, f"age {age_h:.1f}h > {max_age_hours}h"
 
 
-def check_min(value: float | None, threshold: float | None, label: str, unit: str = ""):
-    """value >= threshold."""
+def check_min(value: float | None, threshold: float | None, label: str, unit: str = "", allow_unknown: bool = False):
+    """value >= threshold. If the strategy opts this check into `allow_unknown` (see strategies/*.yaml
+    `filters.allow_unknown`), a missing value passes rather than fails -- for fields like liquidity or
+    GT Score that routinely haven't been indexed yet on pools a few seconds/minutes old."""
     if threshold is None:
         return True, f"{label}: no minimum set"
     if value is None:
+        if allow_unknown:
+            return True, f"{label}: unknown (not indexed yet), allowing"
         return False, f"{label}: unknown"
     if value >= threshold:
         return True, f"{label} {value:,.0f}{unit} >= {threshold:,.0f}{unit}"

@@ -7,6 +7,7 @@ from core.plan import probe_capabilities
 from core.recorder import Recorder
 
 from .config import RECORDINGS_DIR
+from .networks import ensure_valid
 from .scan import enrich_and_screen, fetch_candidates
 from .strategy import Strategy
 
@@ -15,6 +16,7 @@ async def record_session(strategy: Strategy, scans: int = 3, interval_s: float =
     """Runs `scans` real scans and writes every input + check result to a JSONL fixture."""
     client = CoinGeckoClient()
     try:
+        await ensure_valid(client, strategy.networks)
         caps = await probe_capabilities(client)
         rec = Recorder(demo=strategy.name, tag="scan", fixtures_dir=Path(RECORDINGS_DIR))
         rec.write("caps", caps)

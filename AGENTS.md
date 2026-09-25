@@ -8,10 +8,11 @@ the same observations can be replayed later without lookahead.
 ```
 bot/scan.py       discovery, enrichment and scan records
 bot/strategy.py   YAML strategy loading and explainable checks
+bot/networks.py   validates strategy chain/network ids against a cached GET /onchain/networks
 bot/engine.py     paper entries, exits and position metadata
 bot/runner.py     forward/autopilot loop, restart-safe state and credit guard
 bot/backtest.py   recorded-scan replay and historical exit-rule test
-bot/dashboard.py  rich terminal dashboard
+bot/dashboard.py  the branded rich terminal dashboard
 bot/recap.py      markdown end-of-run recap
 bot/record.py     capture scans for repeatable demos
 bot/cli.py        run, backtest, report, article-kit and link commands
@@ -41,7 +42,18 @@ make set-link HANDLE=you
 - `strategies/new-launch-sniff.yaml` is the Demo-friendly starting point.
 - `strategies/trending-momentum.yaml` adds momentum and safety filters.
 - `strategies/smart-money-follow.yaml` adds the Analyst+ top-trader PnL gate.
+- `strategies/base-momentum.yaml` is the same trending-momentum idea on Base, proof a strategy
+  targets any GeckoTerminal network, not just Solana.
+- `strategies/multi-chain-safe-movers.yaml` screens several networks in one megafilter call.
+- A strategy's `source.chain` (one network) or `source.networks`/`source.chains` (a list) can name
+  **any** GeckoTerminal network id. `bot/networks.py` validates every id at startup against a
+  24h-cached `GET /onchain/networks` and fails fast with a clear message on a typo or unsupported id
+  — it never silently scans zero candidates from a bad chain id.
 - Every scan stores candidate inputs and every check result in `data/scans/`.
+- A filter can opt into `filters.allow_unknown: [liquidity, gt_score, volume_24h, txns_24h]` so a
+  missing value (routinely true of pools a few seconds old) logs "unknown, allowing" instead of an
+  automatic fail — see `bot/filters.py::check_min`. Off by default; only strategies that intentionally
+  target very fresh, thinly-indexed pools should turn it on for a given check.
 - `backtest --replay-scans` changes thresholds on recorded observations. It does not pretend a
   historical new-pool listing endpoint exists.
 - All entries and exits go through `core.paper`; no live executor is included.

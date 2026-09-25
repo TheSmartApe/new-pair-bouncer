@@ -12,6 +12,7 @@ from core.client import CoinGeckoClient
 
 from . import backtest as backtest_mod
 from . import config, runstore
+from .networks import UnknownNetworkError
 from .record import record_session
 from .replay import replay_file
 from .screenshot import screenshot_run
@@ -33,20 +34,24 @@ def cmd_run(args):
     strategy = _load_strategy(args.strategy)
     mode = "forward" if args.minutes else "autopilot"
     run_dir = runstore.autopilot_run_dir(strategy.name) if mode == "autopilot" else runstore.new_run_dir(mode, strategy.name)
-    print(f"[bot] {mode} run: {strategy.name} -> {run_dir}")
-    result = asyncio.run(
-        runner.run(
-            strategy,
-            mode,
-            run_dir,
-            minutes=args.minutes,
-            interval_s=args.interval,
-            max_credits_per_day=args.max_credits,
-            starting_cash=args.budget,
-            use_websocket=not args.no_websocket,
-            max_seconds=args.seconds,
+    print(f"[bot] {mode} run: {strategy.name} -> {run_dir} (networks: {', '.join(strategy.networks)})")
+    try:
+        result = asyncio.run(
+            runner.run(
+                strategy,
+                mode,
+                run_dir,
+                minutes=args.minutes,
+                interval_s=args.interval,
+                max_credits_per_day=args.max_credits,
+                starting_cash=args.budget,
+                use_websocket=not args.no_websocket,
+                max_seconds=args.seconds,
+            )
         )
-    )
+    except UnknownNetworkError as exc:
+        print(f"[bot] {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
     print(f"\n[bot] run finished. credits_used={result['credits_used']} metrics={result['metrics']}")
     print(f"[bot] run dir: {result['run_dir']}")
 
@@ -116,7 +121,11 @@ def cmd_set_link(args):
 
 def cmd_record(args):
     strategy = _load_strategy(args.strategy)
-    path = asyncio.run(record_session(strategy, scans=args.scans, interval_s=args.interval))
+    try:
+        path = asyncio.run(record_session(strategy, scans=args.scans, interval_s=args.interval))
+    except UnknownNetworkError as exc:
+        print(f"[bot] {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
     print(f"[bot] recorded {args.scans} scans to {path}")
 
 
