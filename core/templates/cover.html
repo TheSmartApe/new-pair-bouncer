@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1500px; height: 600px; overflow: hidden; }
+  body[data-theme="dark"] {
+    --fg: #f4f7f4;
+    --muted: #b7c2ba;
+    --eyebrow: #8bc53f;
+    background: radial-gradient(circle at 15% 20%, #16241c 0%, #0b0f0d 55%), #0b0f0d;
+  }
+  body[data-theme="light"] {
+    --fg: #12271a;
+    --muted: #56655c;
+    --eyebrow: #3f9b1a;
+    background: radial-gradient(circle at 85% 15%, #eef6e6 0%, #f7f9f6 55%), #f7f9f6;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 68px 76px;
+  }
+  .main { display: flex; flex-direction: row; justify-content: space-between; align-items: stretch; flex: 1; min-height: 0; gap: 40px; }
+  .left { display: flex; flex-direction: column; max-width: 880px; }
+  .eyebrow {
+    font-size: 21px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--eyebrow);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 60px;
+    line-height: 1.15;
+    font-weight: 700;
+    margin-top: 18px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { font-size: 24px; color: var(--muted); margin-top: 18px; font-weight: 500; }
+  .footer { display: flex; align-items: center; justify-content: space-between; margin-top: 28px; }
+  .handle { font-size: 25px; color: var(--muted); }
+  .badge img { height: 44px; display: block; }
+  .visual { width: 440px; display: flex; align-items: flex-end; justify-content: center; flex-shrink: 0; }
+  .visual svg { width: 100%; height: 100%; }
+</style>
+</head>
+<body data-theme="{{theme}}">
+  <div class="main">
+    <div class="left">
+      <div class="eyebrow">Built on CoinGecko API</div>
+      <h1>{{title}}</h1>
+      {{subtitle_html}}
+    </div>
+    <div class="visual">{{visual_svg}}</div>
+  </div>
+  <div class="footer">
+    <div class="handle">by @{{handle}}</div>
+    <div class="badge"><img src="{{logo}}" alt="CoinGecko API"></div>
+  </div>
+</body>
+</html>

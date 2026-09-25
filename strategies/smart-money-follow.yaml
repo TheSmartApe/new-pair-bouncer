@@ -1,0 +1,31 @@
+# Smart-money follow: only enters tokens whose top traders are already realizing strong PnL.
+# Needs Analyst+ (top_traders). On a Demo key the bot logs the locked feature and skips the gate
+# rather than stalling, so the rest of the strategy still runs REST-only.
+name: smart-money-follow
+description: >
+  Screens trending pools, then checks the realized PnL of each token's top traders
+  before taking a paper position. The smart-money gate is an Analyst+ enhancement.
+
+source:
+  type: trending
+  chain: solana
+  duration: 24h
+  n: 15
+
+filters:
+  min_liquidity_usd: 15000
+  min_volume_24h_usd: 20000
+  no_honeypot: true
+  max_top10_holder_pct: 75
+
+smart_money_gate:
+  enabled: true
+  min_top_trader_pnl_usd: 5000
+
+entry:
+  budget_usd: 60
+
+exits:
+  take_profit_pct: 30
+  stop_loss_pct: 15
+  max_hold_minutes: 360

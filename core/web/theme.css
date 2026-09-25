@@ -1,0 +1,46 @@
+/* CSS variables only. Reskin a fork by changing these; --theme-mode picks the right CoinGecko logo. */
+:root {
+  --theme-mode: light; /* light | dark | mono */
+
+  --cg-green: #8bc53f;
+  --cg-green-dark: #4c9a2a;
+
+  --bg: #ffffff;
+  --bg-elevated: #f7f9f6;
+  --text: #12271a;
+  --text-muted: #5c6b62;
+  --border: #e2e8e4;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme="dark"] {
+  --theme-mode: dark;
+  --bg: #0b0f0d;
+  --bg-elevated: #141a17;
+  --text: #f4f7f4;
+  --text-muted: #a8b5ad;
+  --border: #263029;
+}
+
+[data-theme="mono"] {
+  --theme-mode: mono;
+  --bg: #ffffff;
+  --bg-elevated: #f2f2f2;
+  --text: #111111;
+  --text-muted: #666666;
+  --border: #d9d9d9;
+  --cg-green: #111111;
+  --cg-green-dark: #111111;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}

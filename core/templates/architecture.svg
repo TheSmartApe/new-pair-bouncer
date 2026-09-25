@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#f7f9f6"/>
+  <style>
+    .box { fill: #ffffff; stroke: #d8e2da; stroke-width: 2; }
+    .title { font: 700 22px -apple-system, sans-serif; fill: #12271a; }
+    .desc { font: 400 15px -apple-system, sans-serif; fill: #4f5f56; }
+    .arrow { stroke: #8bc53f; stroke-width: 4; }
+    .label { font: 700 14px -apple-system, sans-serif; fill: #8bc53f; letter-spacing: 0.06em; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#8bc53f"/>
+    </marker>
+  </defs>
+
+  <text x="60" y="60" class="label">HOW IT FITS TOGETHER</text>
+
+  <rect x="40" y="110" width="250" height="460" rx="18" class="box"/>
+  <text x="65" y="155" class="title">Discovery</text>
+  <text x="65" y="195" class="desc">Trending / new pools</text>
+  <text x="65" y="220" class="desc">Megafilter, token info</text>
+  <text x="65" y="245" class="desc">Top traders / holders</text>
+  <text x="65" y="280" class="desc">Wallet PnL, trades,</text>
+  <text x="65" y="300" class="desc">balances, transfers</text>
+
+  <line x1="290" y1="340" x2="340" y2="340" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <rect x="345" y="110" width="250" height="460" rx="18" class="box"/>
+  <text x="370" y="155" class="title">Real-time engine</text>
+  <text x="370" y="195" class="desc">WebSocket: G2 trades,</text>
+  <text x="370" y="215" class="desc">G3 OHLCV, G1 onchain</text>
+  <text x="370" y="235" class="desc">price, C1 CEX price</text>
+  <text x="370" y="270" class="desc">Wallet watching:</text>
+  <text x="370" y="290" class="desc">fast polling of trades</text>
+
+  <line x1="595" y1="340" x2="645" y2="340" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <rect x="650" y="110" width="250" height="460" rx="18" class="box"/>
+  <text x="675" y="155" class="title">Decision logic</text>
+  <text x="675" y="195" class="desc">Your code and rules</text>
+  <text x="675" y="220" class="desc">Deterministic scoring</text>
+  <text x="675" y="255" class="desc">Optional: ask an AI</text>
+  <text x="675" y="275" class="desc">agent to summarize</text>
+
+  <line x1="900" y1="340" x2="950" y2="340" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <rect x="955" y="110" width="205" height="460" rx="18" class="box"/>
+  <text x="980" y="155" class="title">Execution</text>
+  <text x="980" y="195" class="desc">Paper trading</text>
+  <text x="980" y="220" class="desc">Backtest, forward</text>
+  <text x="980" y="240" class="desc">test, autopilot</text>
+  <text x="980" y="275" class="desc">Live trading: wire</text>
+  <text x="980" y="295" class="desc">your own executor</text>
+
+  <text x="60" y="650" class="desc">Data powered by CoinGecko API</text>
+</svg>

@@ -1,0 +1,31 @@
+# Trending-momentum: rides pools that are already trending with real volume behind the move.
+# Demo-friendly: trending_pools works on a free Demo key.
+name: trending-momentum
+description: >
+  Screens today's trending pools for real volume and short-term upward momentum,
+  with a light safety check via token_info.
+
+source:
+  type: trending
+  chain: solana
+  duration: 1h          # 5m | 1h | 6h | 24h
+  n: 20
+
+filters:
+  min_liquidity_usd: 20000
+  min_volume_24h_usd: 50000
+  min_txns_24h: 50
+  min_price_change_pct_1h: 5
+  no_honeypot: true
+  max_top10_holder_pct: 80
+
+smart_money_gate:
+  enabled: false
+
+entry:
+  budget_usd: 75
+
+exits:
+  take_profit_pct: 25
+  stop_loss_pct: 12
+  max_hold_minutes: 180

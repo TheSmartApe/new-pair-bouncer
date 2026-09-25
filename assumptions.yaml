@@ -1,0 +1,6 @@
+slippage_bps: 30
+fee_bps: 25
+starting_cash: 1000
+max_position_pct: 0.2
+cooldown_s: 30
+latency_note: Decisions are made on polled or streamed data, not a live order book. Real fills would differ.

@@ -1,0 +1,33 @@
+# New-launch sniff test: screens brand-new pools for basic safety before anything else.
+# Demo-friendly: new_pools works on a free Demo key. GT Score / honeypot / holder checks
+# need token_info, which is also Demo-available, so this whole strategy runs on Demo.
+name: new-launch-sniff
+description: >
+  Screens new pools for age, liquidity, and on-chain safety (GT Score, honeypot,
+  holder concentration, dev holding) before taking a small paper position.
+
+source:
+  type: new_pools     # new_pools | trending | megafilter
+  chain: solana
+  n: 20                # candidates pulled per scan
+
+filters:
+  max_age_hours: 6
+  min_liquidity_usd: 10000
+  min_volume_24h_usd: 5000
+  min_txns_24h: 20
+  min_gt_score: 60
+  no_honeypot: true
+  max_top10_holder_pct: 70
+  max_dev_holding_pct: 15
+
+smart_money_gate:
+  enabled: false
+
+entry:
+  budget_usd: 50
+
+exits:
+  take_profit_pct: 40
+  stop_loss_pct: 15
+  max_hold_minutes: 240
