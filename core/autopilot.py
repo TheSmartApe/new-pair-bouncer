@@ -58,7 +58,15 @@ class Autopilot:
                 if self._over_budget():
                     log.info("budget reached, pausing %s", job.name)
                 continue
-            await job.run()
+            try:
+                await job.run()
+            except Exception:
+                # Every job here runs inside asyncio.gather(*tasks) in run_forever(), with no
+                # return_exceptions=True: before this guard, one job's exception (a transient
+                # network hiccup, an unexpected payload) propagated out of gather() and silently
+                # killed every other job too -- the whole autopilot process would just stop doing
+                # anything after that tick, with nothing in the logs pointing at why.
+                log.exception("job %s raised; skipping this tick, will retry next interval", job.name)
             last = time.time()
             self.store.set(f"last_run:{job.name}", last)
 

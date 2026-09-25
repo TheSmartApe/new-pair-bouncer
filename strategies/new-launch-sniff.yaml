@@ -11,11 +11,19 @@ source:
   chain: solana
   n: 20                # candidates pulled per scan
 
+# Tuned against a live spot check of /onchain/networks/solana/new_pools: most candidates from that
+# feed are literally seconds to minutes old, so "24h volume" and "liquidity" are necessarily tiny at
+# that point -- the old thresholds here (liquidity $10k, 24h volume $5k, 20 txns) failed 15-20 of
+# every 20 candidates on liquidity/volume alone and produced zero passes across three separate
+# 3-minute test runs. These are loosened to match what a brand-new pool can realistically show in
+# its first minutes while still screening out the completely dead launches (near-zero liquidity,
+# 1 txn, no real trading yet). If this strategy goes back to 0/20 on a normal market day, check the
+# per-candidate check reasons in data/scans/new-launch-sniff.jsonl before loosening further.
 filters:
   max_age_hours: 6
-  min_liquidity_usd: 10000
-  min_volume_24h_usd: 5000
-  min_txns_24h: 20
+  min_liquidity_usd: 2500
+  min_volume_24h_usd: 300
+  min_txns_24h: 5
   min_gt_score: 60
   no_honeypot: true
   max_top10_holder_pct: 70

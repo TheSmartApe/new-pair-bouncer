@@ -37,6 +37,19 @@ class CreditBudgetExceeded(CoinGeckoError):
         self.limit = limit
 
 
+class NetworkError(CoinGeckoError):
+    """A transport-level failure (timeout, connection reset, DNS) rather than an HTTP error response.
+
+    Every call site in this repo already catches CoinGeckoError to degrade gracefully (skip a pool,
+    show a locked card, log a reason). Before this wrapped it, a plain network hiccup raised a raw
+    httpx exception instead, which none of those `except CoinGeckoError` clauses caught -- so one
+    slow response could crash an entire live session (or an autopilot scan) silently, with nothing
+    surfaced to the user."""
+
+    def __init__(self, exc: Exception):
+        super().__init__(0, f"{type(exc).__name__}: {exc}")
+
+
 def _error_code(body_text: str) -> int | None:
     """Pulls CoinGecko's app-level status.error_code out of a JSON error body, if present."""
     try:
@@ -110,7 +123,13 @@ class CoinGeckoClient:
             for attempt in range(config.MAX_RETRIES):
                 if self.max_credits is not None and self.credits_used >= self.max_credits:
                     raise CreditBudgetExceeded(self.max_credits)
-                response = await self._client.get(path, params=params)
+                try:
+                    response = await self._client.get(path, params=params)
+                except httpx.HTTPError as exc:
+                    if attempt < config.MAX_RETRIES - 1:
+                        await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
+                        continue
+                    raise NetworkError(exc) from exc
                 if response.status_code == 429 and attempt < config.MAX_RETRIES - 1:
                     await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
                     continue
