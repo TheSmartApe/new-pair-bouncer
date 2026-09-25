@@ -38,9 +38,12 @@ class ScanResult:
 
 
 async def fetch_candidates(client: CoinGeckoClient, strategy: Strategy, caps: dict) -> tuple[list[dict], str, list[str]]:
-    """Pulls raw pool rows for the strategy's configured source, falling back and noting any lock."""
+    """Pulls raw pool rows for the strategy's configured source, falling back and noting any lock.
+    A strategy can target one network (`source.chain`) or several (`source.networks`/`source.chains`);
+    the single-network endpoints (trending/new_pools) are called once per network and merged, while
+    megafilter takes the whole list natively in one call via its own `networks` filter param."""
     src = strategy.source
-    chain = src.get("chain", "solana")
+    networks = strategy.networks
     n = src.get("n", config.DEFAULTS["max_candidates"])
     locked: list[str] = []
     kind = src.get("type", "trending")
@@ -49,18 +52,27 @@ async def fetch_candidates(client: CoinGeckoClient, strategy: Strategy, caps: di
         locked.append("🔒 megafilter needs the Analyst plan: https://www.coingecko.com/en/api/pricing — falling back to trending pools")
         kind = "trending"
 
-    if kind == "new_pools":
-        rows = await client.new_pools(chain, n)
-        note = f"new_pools/{chain}"
-    elif kind == "megafilter":
-        rows = await client.megafilter(**(src.get("megafilter_params") or {"checks": "no_honeypot,good_gt_score"}))
-        note = "megafilter"
-    else:
-        duration = src.get("duration", "1h")
-        rows = await client.trending_pools(chain, duration, n)
-        note = f"trending/{chain}/{duration}"
+    if kind == "megafilter":
+        params = dict(src.get("megafilter_params") or {"checks": "no_honeypot,good_gt_score"})
+        params.setdefault("networks", ",".join(networks))
+        rows = await client.megafilter(**params)
+        note = f"megafilter/{params['networks']}"
+        return [normalize_pool(r) for r in rows[:n]], note, locked
 
-    return [normalize_pool(r, chain) for r in rows], note, locked
+    all_candidates: list[dict] = []
+    notes: list[str] = []
+    per_network_n = max(1, n // len(networks)) if len(networks) > 1 else n
+    for chain in networks:
+        if kind == "new_pools":
+            rows = await client.new_pools(chain, per_network_n)
+            notes.append(f"new_pools/{chain}")
+        else:
+            duration = src.get("duration", "1h")
+            rows = await client.trending_pools(chain, duration, per_network_n)
+            notes.append(f"trending/{chain}/{duration}")
+        all_candidates += [normalize_pool(r, chain) for r in rows]
+
+    return all_candidates, " + ".join(notes), locked
 
 
 async def enrich_and_screen(client: CoinGeckoClient, strategy: Strategy, candidates: list[dict], caps: dict) -> tuple[list[Evaluation], list[str]]:

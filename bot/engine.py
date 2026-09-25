@@ -16,6 +16,7 @@ class PositionMeta:
     address: str
     symbol: str
     strategy: str
+    pair: str = ""  # the pool's pair name, e.g. "COIN / SOL", for dashboard display
 
 
 @dataclass
@@ -46,7 +47,7 @@ class Engine:
         filled = self.portfolio.buy(key, ts, price, usd=budget)
         if not filled:
             return {"action": "entry_skipped", "symbol": c.get("symbol"), "reason": "on cooldown, no cash, or position-size cap reached"}
-        self.meta[key] = PositionMeta(chain=c["chain"], address=c["address"], symbol=c.get("symbol", key), strategy=self.strategy.name)
+        self.meta[key] = PositionMeta(chain=c["chain"], address=c["address"], symbol=c.get("symbol", key), strategy=self.strategy.name, pair=c.get("name", ""))
         return {
             "action": "entry",
             "symbol": c.get("symbol"),
@@ -130,6 +131,8 @@ class Engine:
             rows.append(
                 {
                     "symbol": meta.symbol if meta else key,
+                    "chain": meta.chain if meta else "",
+                    "pair": (meta.pair if meta else "") or (meta.symbol if meta else key),
                     "entry_price": entry_price,
                     "price": price,
                     "change_pct": change_pct,

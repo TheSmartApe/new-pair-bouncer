@@ -63,6 +63,23 @@ class Strategy:
         return cls(yaml.safe_load(Path(path).read_text()))
 
     @property
+    def networks(self) -> list[str]:
+        """Every network id this strategy's source scans: `source.networks`/`source.chains` (a list) if
+        set, else the single `source.chain` (default 'solana'). Strategies can target any GeckoTerminal
+        network or list of them -- there's no hard-coded chain allowlist here."""
+        src = self.source
+        nets = src.get("networks") or src.get("chains")
+        if nets:
+            return [str(n) for n in nets]
+        return [str(src.get("chain", "solana"))]
+
+    @property
+    def _allow_unknown(self) -> set[str]:
+        """Check names this strategy has opted into treating a missing value as a pass rather than a
+        fail (`filters.allow_unknown: [liquidity, gt_score]`) -- see filters.check_min."""
+        return set(self.pool_filters.get("allow_unknown", []) or [])
+
+    @property
     def needs_token_info(self) -> bool:
         f = self.pool_filters
         return any(k in f for k in ("min_gt_score", "no_honeypot", "max_top10_holder_pct", "max_dev_holding_pct"))
@@ -77,11 +94,22 @@ class Strategy:
         f = self.pool_filters
         now = now_ts()
         ev.checks.append(CheckResult("age", *filters.check_max_age(candidate.get("pool_created_at"), now, f.get("max_age_hours"))))
-        ev.checks.append(CheckResult("liquidity", *filters.check_min(candidate.get("liquidity_usd"), f.get("min_liquidity_usd"), "liquidity", " USD")))
-        ev.checks.append(CheckResult("volume_24h", *filters.check_min(candidate.get("volume_24h_usd"), f.get("min_volume_24h_usd"), "24h volume", " USD")))
+        allow_unknown = self._allow_unknown
+        ev.checks.append(
+            CheckResult(
+                "liquidity",
+                *filters.check_min(candidate.get("liquidity_usd"), f.get("min_liquidity_usd"), "liquidity", " USD", allow_unknown="liquidity" in allow_unknown),
+            )
+        )
+        ev.checks.append(
+            CheckResult(
+                "volume_24h",
+                *filters.check_min(candidate.get("volume_24h_usd"), f.get("min_volume_24h_usd"), "24h volume", " USD", allow_unknown="volume_24h" in allow_unknown),
+            )
+        )
         min_txns = f.get("min_txns_24h")
         txns = (candidate.get("buys_24h") or 0) + (candidate.get("sells_24h") or 0)
-        ev.checks.append(CheckResult("txns_24h", *filters.check_min(txns, min_txns, "24h txns")))
+        ev.checks.append(CheckResult("txns_24h", *filters.check_min(txns, min_txns, "24h txns", allow_unknown="txns_24h" in allow_unknown)))
         if "min_price_change_pct_1h" in f:
             ev.checks.append(
                 CheckResult("momentum_1h", *filters.check_min(candidate.get("price_change_pct_1h"), f.get("min_price_change_pct_1h"), "1h price change", "%"))
@@ -94,7 +122,9 @@ class Strategy:
         f = self.pool_filters
         info = token_info or {}
         if "min_gt_score" in f:
-            ev.checks.append(CheckResult("gt_score", *filters.check_min(info.get("gt_score"), f.get("min_gt_score"), "GT Score")))
+            ev.checks.append(
+                CheckResult("gt_score", *filters.check_min(info.get("gt_score"), f.get("min_gt_score"), "GT Score", allow_unknown="gt_score" in self._allow_unknown))
+            )
         if f.get("no_honeypot"):
             ev.checks.append(CheckResult("honeypot", *filters.check_honeypot(info.get("is_honeypot"), True)))
         if "max_top10_holder_pct" in f:

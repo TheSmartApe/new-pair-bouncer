@@ -1,0 +1,36 @@
+# Multi-chain safe movers: one scan, several networks at once, via /onchain/pools/megafilter's own
+# `networks` filter (comma-separated, one API call). Needs the Analyst plan; on a Demo or Free key
+# the bot logs the lock and falls back to trending pools on each of the same networks instead, so
+# the strategy still runs end to end everywhere.
+name: multi-chain-safe-movers
+description: >
+  Screens pools across Solana, Base and Ethereum in one megafilter call for the "safe mover"
+  profile (no honeypot, good GT Score) before taking a small paper position on whichever chain
+  the candidate happened to be on.
+
+source:
+  type: megafilter
+  networks: [solana, base, eth]   # any list of GET /onchain/networks ids -- not hard-limited to these three
+  n: 20
+  megafilter_params:
+    checks: no_honeypot,good_gt_score
+    reserve_usd_min: 20000
+    h24_volume_usd_min: 25000
+    sort: h24_volume_usd_desc
+
+filters:
+  min_liquidity_usd: 20000
+  min_volume_24h_usd: 25000
+  no_honeypot: true
+  max_top10_holder_pct: 80
+
+smart_money_gate:
+  enabled: false
+
+entry:
+  budget_usd: 75
+
+exits:
+  take_profit_pct: 25
+  stop_loss_pct: 12
+  max_hold_minutes: 180

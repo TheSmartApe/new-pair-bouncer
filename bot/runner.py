@@ -19,6 +19,7 @@ from core.store import Store
 
 from . import config, dashboard, recap, runstore
 from .engine import Engine, PositionMeta
+from .networks import ensure_valid
 from .scan import record_scan, run_scan
 from .wsfeed import WsFeed
 
@@ -72,6 +73,11 @@ async def run(
 
     client = CoinGeckoClient()
     caps = await probe_capabilities(client)
+    try:
+        known_networks = await ensure_valid(client, strategy.networks)
+    except Exception:
+        await client.close()
+        raise
 
     store = Store(run_dir / "state.db")
     state = store.get("portfolio")
@@ -99,6 +105,7 @@ async def run(
         plan_note=plan_note,
         mode=mode,
         max_credits_per_day=max_credits_per_day,
+        network_names=known_networks,
     )
 
     def _credits_today() -> float:
@@ -147,6 +154,7 @@ async def run(
         state_view.open_positions = engine.open_positions_view(prices)
         state_view.metrics = engine.portfolio.metrics(prices)
         state_view.credits_used = client.credits_used
+        state_view.equity_curve = engine.portfolio.equity_curve
         await _persist()
 
     autopilot = Autopilot(
@@ -159,6 +167,7 @@ async def run(
 
     console = dashboard.make_console()
     stop_render = asyncio.Event()
+    state_view.interval_s = interval_s
 
     async def render_loop():
         with Live(dashboard.render(state_view), console=console, refresh_per_second=2, screen=False) as live:

@@ -150,6 +150,23 @@ class CoinGeckoClient:
 
     # ---- discovery ----
 
+    async def networks(self) -> list[dict]:
+        """Every onchain network GeckoTerminal supports (id + display name), paginated across all pages.
+        Each page is cached 24h, so repeated calls across a process's lifetime (or across short-lived CLI
+        invocations that share a warm cache) cost no extra credits."""
+        out: list[dict] = []
+        page = 1
+        while True:
+            d = await self.get("/onchain/networks", {"page": page}, ttl=config.STABLE_TTL_S)
+            rows = d.get("data", [])
+            if not rows:
+                break
+            out += rows
+            page += 1
+            if page > 50:  # safety net against an unexpected infinite-pagination response
+                break
+        return out
+
     async def trending_pools(self, network: str, duration: str = "1h", n: int = 20) -> list[dict]:
         """Trending pools on a network."""
         d = await self.get(
@@ -165,7 +182,10 @@ class CoinGeckoClient:
         return d.get("data", [])[:n]
 
     async def megafilter(self, **filters) -> list[dict]:
-        """Pools matching arbitrary /onchain/pools/megafilter filters."""
+        """Pools matching arbitrary /onchain/pools/megafilter filters, across one or more `networks` (comma-separated).
+        Always asks for the `network` relationship so callers can tell which chain each row belongs to."""
+        filters = dict(filters)
+        filters.setdefault("include", "base_token,network")
         d = await self.get("/onchain/pools/megafilter", filters, ttl=config.TRENDING_TTL_S)
         return d.get("data", [])
 
