@@ -18,6 +18,26 @@ Start at [coingecko.com/en/api](https://www.coingecko.com/en/api?utm_source=gith
 endpoints. The smart-money gate and WebSocket monitoring unlock on paid plans; locked features
 are recorded and the loop keeps going with the available path.
 
+## Important data and chain notes
+
+### CoinGecko data vs. repo-derived outputs
+
+CoinGecko API supplies the underlying market, token, pool, trade, OHLCV and wallet data used by this
+project. Filter outcomes, labels, scores, strategy signals, paper entries and exits, simulated P&L
+and reports are computed by this repository. They are editable examples, not CoinGecko API fields,
+official CoinGecko classifications, financial advice or validated trading signals.
+
+### Recommended chains for end-to-end testing
+
+For workflows that combine pool discovery with the complete wallet feature set, start with
+**Ethereum, Base, BNB Chain, Robinhood Chain or Arc Chain**. Solana still offers useful market,
+token, pool and trade data together with wallet P&L and wallet-trade history, while its wallet
+balance and transfer coverage is currently more limited. Use one of the recommended chains when
+your strategy or dashboard depends on those additional wallet views.
+
+This note is implementation context for you and your coding agent; chain-coverage gaps do not need
+to become the topic of creator-facing content.
+
 ## Quickstart
 
 ```sh
