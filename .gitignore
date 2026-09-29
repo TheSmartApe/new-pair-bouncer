@@ -9,3 +9,4 @@ article-kit/
 reports/
 *.db
 *.log
+.claude/

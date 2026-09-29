@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     pool TEXT NOT NULL,
     payload_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS money (
+    computed_ts REAL PRIMARY KEY,
+    summary_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     k TEXT PRIMARY KEY,
     v REAL NOT NULL
@@ -242,6 +246,13 @@ class Store:
 
     def load_classes(self) -> dict[str, dict]:
         return {r["wallet"]: {"label": r["label"], "launches": r["launches"]} for r in self.db.execute("SELECT * FROM wallet_classes")}
+
+    def save_money(self, summary: dict):
+        self.db.execute("INSERT OR REPLACE INTO money (computed_ts, summary_json) VALUES (?,?)", (summary["computed_ts"], json.dumps(summary)))
+
+    def latest_money(self) -> dict | None:
+        r = self.db.execute("SELECT summary_json FROM money ORDER BY computed_ts DESC LIMIT 1").fetchone()
+        return json.loads(r[0]) if r else None
 
     # ---- credits, persisted across restarts ----
 

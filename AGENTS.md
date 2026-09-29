@@ -15,7 +15,9 @@ sniper/analyze.py   pure, offline: launch tapes, wallet classes, packs, outcomes
 sniper/collect.py   the 24/7 loop: discover -> capture launch tapes -> snapshots -> alerts -> hourly housekeeping
 sniper/profile.py   wallet PnL + trade-history profiles, token info enrichment
 sniper/report.py    reports/serial-snipers.md
-sniper/cli.py       collect, leaderboard, profile, enrich, report
+sniper/money.py     cash in vs cash out per serial wallet (CoinGecko wallet PnL, paged; FIFO fallback)
+sniper/web.py + sniper/web/  read-only live dashboard (python -m sniper web)
+sniper/cli.py       collect, leaderboard, profile, enrich, money, web, report
 scripts/            Windows supervisor (run-forever.cmd, start.ps1, stop.ps1)
 docs/make_architecture.py  renders docs/architecture.png
 tests/test_sniper_analyze.py  offline tests; no network calls

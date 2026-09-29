@@ -73,6 +73,18 @@ make sniper-report
 
 Everything lands in `data/sniper.db` (SQLite). Stopping and restarting resumes where it left off.
 
+Watch it live and see where the money went:
+
+```sh
+.venv/Scripts/python -m sniper money     # cash in vs cash out for every serial wallet (CoinGecko wallet PnL)
+.venv/Scripts/python -m sniper web       # dashboard on http://localhost:8765, next to the running collector
+```
+
+The dashboard is read-only: it reads the database, never calls the API and never sees your key.
+It shows the live launch feed (buyers, who bought in the first 10 seconds, serial snipers, round-trip
+bots, the dev's own buy), live alerts, the share of launches with snipers and bots, and the money
+panel from the last `money` run.
+
 ## Commands
 
 | command | what it does | credits |
@@ -82,6 +94,8 @@ Everything lands in `data/sniper.db` (SQLite). Stopping and restarting resumes w
 | `python -m sniper report [--handle you]` | write `reports/serial-snipers.md` | 0 |
 | `python -m sniper enrich` | developer and launchpad info for launches that drew serial wallets | 1 per launch |
 | `python -m sniper profile --top 20` | wallet PnL plus recent trade history for the top serial snipers and round-trippers | ~4 per wallet |
+| `python -m sniper money` | what every serial wallet put into the tokens it sniped and took out (cash), winners vs losers, best position | ~8 per wallet |
+| `python -m sniper web [--port 8765]` | live dashboard, read-only | 0 |
 
 `leaderboard` and `report` read only the database. Change `snipe_s`, `min_launches` or any pack
 setting and re-run them against the same recorded data without spending credits.
@@ -141,6 +155,10 @@ a wallet. Read the raw trades before you build a claim on a label.
   launch trades an hour later, which would make almost every pool look alive at +1h.
 - **Multiples are not PnL.** A multiple compares a later pool price with the average price paid in
   the snipe window. It is not what any wallet realized.
+- **Money is cash.** `money` reports what wallets paid for the tokens they sniped and what they sold
+  them for, from CoinGecko's wallet PnL (all of the wallet's trades in those tokens). CoinGecko's
+  unrealized PnL is kept for reference only: it marks leftover bags of tiny tokens at a last price
+  nobody can sell into, and it can make a wallet that lost cash look like a big winner.
 - **Other chains**: set `chains` to any GeckoTerminal network id. Ethereum, Base, BNB Chain,
   Robinhood Chain and Arc Chain have the full wallet feature set.
 

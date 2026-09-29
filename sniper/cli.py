@@ -94,6 +94,21 @@ def cmd_enrich(args):
     print(f"enriched {sum(1 for r in results if 'error' not in r)} of {len(todo)} launches, {credits} credits")
 
 
+def cmd_money(args):
+    from . import money
+
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    summary = money.run(store, cfg)
+    print(money.fmt(summary))
+
+
+def cmd_web(args):
+    from . import web
+
+    web.serve(Path(args.db), _cfg(args), port=args.port)
+
+
 def cmd_report(args):
     cfg = _cfg(args)
     store = Store(Path(args.db))
@@ -123,6 +138,8 @@ def main(argv=None):
         ("profile", cmd_profile, "enrich top serial snipers and round-trippers with wallet PnL and trade history"),
         ("enrich", cmd_enrich, "fetch developer / launchpad info for launches that drew serial wallets"),
         ("report", cmd_report, "write the markdown report"),
+        ("money", cmd_money, "what serial wallets put into their snipes and took out (CoinGecko wallet PnL), stored for the report and dashboard"),
+        ("web", cmd_web, "live dashboard on http://localhost:8765 (read-only, run it next to the collector)"),
     )
     for name, fn, help_ in commands:
         p = sub.add_parser(name, help=help_)
@@ -135,6 +152,8 @@ def main(argv=None):
         if name == "report":
             p.add_argument("--handle", default=None)
             p.add_argument("--out", default=None)
+        if name == "web":
+            p.add_argument("--port", type=int, default=8765)
         p.set_defaults(fn=fn)
 
     args = ap.parse_args(argv)
