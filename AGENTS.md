@@ -1,4 +1,33 @@
-# Agent notes for Onchain Signal Bot
+# Agent notes for Serial Sniper Tracker
+
+This repo has two parts:
+
+- `sniper/`: the Serial Sniper Tracker (the main project, see README.md and the section below).
+- `bot/` + `core/` + `strategies/`: CoinGecko's onchain-signal-bot starter it was forked from,
+  unchanged. `sniper/` reuses `core/client.py`, `core/wallets.py` and `core/links.py`.
+
+## Serial Sniper Tracker
+
+```
+sniper/config.py    every tunable, loaded from sniper.yaml
+sniper/store.py     SQLite (WAL): pools, trades, snapshots, wallets, launch_info, alerts; live_serial() SQL mirror
+sniper/analyze.py   pure, offline: launch tapes, wallet classes, packs, outcomes (all code-derived labels)
+sniper/collect.py   the 24/7 loop: discover -> capture launch tapes -> snapshots -> alerts -> hourly housekeeping
+sniper/profile.py   wallet PnL + trade-history profiles, token info enrichment
+sniper/report.py    reports/serial-snipers.md
+sniper/cli.py       collect, leaderboard, profile, enrich, report
+scripts/            Windows supervisor (run-forever.cmd, start.ps1, stop.ps1)
+docs/make_architecture.py  renders docs/architecture.png
+tests/test_sniper_analyze.py  offline tests; no network calls
+```
+
+- The collector stores raw launch tapes; thresholds are applied at analysis time. Keep it that way
+  so `report` can replay new thresholds without spending credits.
+- `store.live_serial()` must keep producing the same classes as `analyze.wallet_stats()`
+  (`test_live_sql_classes_match_python` guards this). Change both together.
+- Never present a class, pack, multiple or score as a CoinGecko API field.
+
+## Onchain Signal Bot (the starter)
 
 This is a headless, paper-only CoinGecko API bot. Its scan records are deliberately complete so
 the same observations can be replayed later without lookahead.

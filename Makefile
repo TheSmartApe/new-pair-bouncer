@@ -8,7 +8,7 @@ FILE ?=
 OUT ?= docs/screens/dashboard.png
 NO_WEBSOCKET ?=
 
-.PHONY: install run test backtest forward autopilot report article-kit set-link record replay screenshot
+.PHONY: install run test backtest forward autopilot report article-kit set-link record replay screenshot sniper-collect sniper-autopilot sniper-leaderboard sniper-report sniper-profile sniper-enrich
 
 install:
 	uv venv --python 3.12 .venv
@@ -47,3 +47,24 @@ replay:
 
 screenshot:
 	.venv/bin/python -m bot screenshot --run $(RUN) --out $(OUT)
+
+# ---- Serial Sniper Tracker ----
+SNIPER_MINUTES ?=
+
+sniper-collect:
+	.venv/bin/python -m sniper collect $(if $(SNIPER_MINUTES),--minutes $(SNIPER_MINUTES))
+
+sniper-autopilot:
+	mkdir -p data && nohup .venv/bin/python -m sniper collect >> data/collect.log 2>&1 &
+
+sniper-leaderboard:
+	.venv/bin/python -m sniper leaderboard
+
+sniper-report:
+	.venv/bin/python -m sniper report $(if $(HANDLE),--handle $(HANDLE))
+
+sniper-profile:
+	.venv/bin/python -m sniper profile --top 20
+
+sniper-enrich:
+	.venv/bin/python -m sniper enrich

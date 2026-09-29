@@ -1,0 +1,131 @@
+"""`python -m sniper <command>`: collect, leaderboard, profile, enrich, report."""
+import argparse
+import asyncio
+import json
+from pathlib import Path
+
+from . import analyze, collect, report
+from .config import DB_PATH, REPORTS_DIR, SniperConfig
+from .profile import enrich_launches, profile_many
+from .store import Store
+
+
+def _cfg(args) -> SniperConfig:
+    cfg = SniperConfig.load(Path(args.config) if args.config else None)
+    if getattr(args, "chains", None):
+        cfg.chains = [c.strip() for c in args.chains.split(",") if c.strip()]
+    for name in ("snipe_s", "min_launches", "interval_s"):
+        value = getattr(args, name, None)
+        if value is not None:
+            setattr(cfg, name, value)
+    return cfg
+
+
+def cmd_collect(args):
+    cfg = _cfg(args)
+    try:
+        result = asyncio.run(collect.run(cfg, Path(args.db), minutes=args.minutes, max_credits=args.max_credits))
+    except KeyboardInterrupt:
+        print("\nstopped. the database keeps everything recorded so far; run it again to resume.")
+        return
+    if result == "budget":
+        raise SystemExit(3)  # scripts/run-forever.cmd treats exit code 3 as "do not restart"
+
+
+def cmd_leaderboard(args):
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    trades = store.all_trades()
+    stats = analyze.wallet_stats(trades, store.all_pools(), cfg)
+    for label in analyze.SERIAL_CLASSES:
+        rows = sorted((s for s in stats.values() if s["label"] == label), key=lambda s: (-s["launches"], s["median_sec_offset"]))
+        if not rows:
+            continue
+        print(f"\n{label} ({len(rows)})")
+        print(f"{'wallet':44} {'launches':>8} {'blk0':>5} {'speed':>7} {'median $':>9} {'total $':>10} {'sold':>5} {'trips':>5} {'hold':>7}")
+        for s in rows[: args.top]:
+            hold = "-" if s["median_hold_in_window_s"] is None else f"{s['median_hold_in_window_s']:.0f}s"
+            print(f"{s['wallet']:44} {s['launches']:>8} {s['block0_launches']:>5} {'+' + format(s['median_sec_offset'], '.0f') + 's':>7} {s['median_snipe_usd']:>9,.2f} {s['snipe_usd']:>10,.2f} {s['sold_in_window']:>5} {s['round_trips']:>5} {hold:>7}")
+    packs = analyze.find_packs(trades, stats, cfg)
+    if packs:
+        print(f"\n{len(packs)} pack(s):")
+        for p in packs[:10]:
+            print(f"  {p['size']} {p['kind']}s, {p['shared_launches']} shared launches, same block {100 * p['same_block_rate']:.0f}%: {', '.join(w[:10] for w in p['members'][:8])}")
+
+
+def cmd_profile(args):
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    stats = analyze.wallet_stats(store.all_trades(), store.all_pools(), cfg)
+    rows = []
+    for label in ("serial_sniper", "round_tripper"):
+        rows += sorted((s for s in stats.values() if s["label"] == label), key=lambda s: -s["launches"])[: args.top]
+    token_of_pool = {f"{p['chain']}:{p['pool']}": p["token"] for p in store.all_pools()}
+    profiles, credits = asyncio.run(profile_many(rows, cfg.chains, token_of_pool))
+    for prof in profiles:
+        store.save_profile(prof["wallet"], prof)
+    store.commit()
+    print(f"profiled {len(profiles)} wallets, {credits} credits")
+
+
+def cmd_enrich(args):
+    """token_info for launches that drew serial wallets and haven't been enriched yet."""
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    stats = analyze.wallet_stats(store.all_trades(), store.all_pools(), cfg)
+    outcomes = analyze.launch_outcomes(store.all_pools(), store.all_trades(), store.all_snapshots(), stats, cfg)
+    done = store.launch_info()
+    todo = [o for o in outcomes if (o["round_trippers"] or o["serial_snipers"]) and (o["chain"], o["pool"]) not in done][: args.max_launches]
+    results, credits = asyncio.run(enrich_launches(todo))
+    for r in results:
+        if "error" not in r:
+            store.save_launch_info(r["chain"], r["pool"], r)
+    store.commit()
+    print(f"enriched {sum(1 for r in results if 'error' not in r)} of {len(todo)} launches, {credits} credits")
+
+
+def cmd_report(args):
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    text, summary = report.build(store, cfg, top=args.top, handle=args.handle)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out) if args.out else REPORTS_DIR / "serial-snipers.md"
+    out.write_text(text, encoding="utf-8")
+    print(json.dumps(summary))
+    print(f"report -> {out}")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="python -m sniper", description="Serial Sniper Tracker on CoinGecko API data")
+    ap.add_argument("--db", default=str(DB_PATH))
+    ap.add_argument("--config", default=None, help="path to a sniper.yaml (default: repo root)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("collect", help="record launch tapes and outcomes (runs until stopped, or --minutes)")
+    c.add_argument("--chains", help="comma-separated GeckoTerminal network ids, e.g. robinhood")
+    c.add_argument("--minutes", type=float, default=None)
+    c.add_argument("--interval-s", dest="interval_s", type=int, default=None)
+    c.add_argument("--max-credits", type=int, default=None, help="stop before spending more than this many credits")
+    c.set_defaults(fn=cmd_collect)
+
+    commands = (
+        ("leaderboard", cmd_leaderboard, "print serial wallets by class, and packs"),
+        ("profile", cmd_profile, "enrich top serial snipers and round-trippers with wallet PnL and trade history"),
+        ("enrich", cmd_enrich, "fetch developer / launchpad info for launches that drew serial wallets"),
+        ("report", cmd_report, "write the markdown report"),
+    )
+    for name, fn, help_ in commands:
+        p = sub.add_parser(name, help=help_)
+        p.add_argument("--chains")
+        p.add_argument("--top", type=int, default=20)
+        p.add_argument("--snipe-s", dest="snipe_s", type=int, default=None)
+        p.add_argument("--min-launches", dest="min_launches", type=int, default=None)
+        if name == "enrich":
+            p.add_argument("--max-launches", type=int, default=500)
+        if name == "report":
+            p.add_argument("--handle", default=None)
+            p.add_argument("--out", default=None)
+        p.set_defaults(fn=fn)
+
+    args = ap.parse_args(argv)
+    args.fn(args)
