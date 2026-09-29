@@ -27,12 +27,14 @@ turn it into classes, packs, alerts and outcome stats.
 ## What you get
 
 - **Live alerts** when a wallet already known as a serial sniper shows up in the first seconds of a new launch.
-- **Three leaderboards**:
-  - **serial snipers** buy within 10 seconds of the first trade on 3+ launches and hold.
-  - **round-trippers** buy in 10 seconds and sell again within 30 seconds, at a loss, launch after launch.
-  - **serial launchers** buy in the launch block itself, which on launchpads is usually the dev.
+- **Four leaderboards**:
+  - **serial snipers** buy within 10 seconds of the first trade on 3+ launches, and hold or sell at a profit.
+  - **round-trippers** buy in 10 seconds and sell again within 30 seconds (or on a fixed timer), without making money, launch after launch.
+  - **dust bots** snipe every launch with less than $1.
+  - **serial launchers** are the token's developer (from CoinGecko token info) or the buyer in the pool's creation block.
 - **Packs**: serial wallets that keep sniping the same launches, a median of at most 3 blocks apart.
 - **Outcomes**: every recorded launch is re-checked at +1h, +6h and +24h. Is it still trading? Where is the price versus what the snipers paid? The report compares launches with and without serial snipers, and with and without round-trippers.
+- **Day-by-day numbers**: wallet classes are recomputed for each UTC day on its own, so days compare fairly however long the tracker has been running.
 - **The devs behind it**: for launchpad tokens, which developer addresses keep drawing round-trippers.
 - **An hourly markdown report** at `reports/serial-snipers.md`, rewritten automatically while the collector runs.
 
@@ -75,7 +77,7 @@ Everything lands in `data/sniper.db` (SQLite). Stopping and restarting resumes w
 
 | command | what it does | credits |
 |---|---|---|
-| `python -m sniper collect [--minutes N] [--max-credits N]` | discover launches, record launch tapes, snapshot outcomes, raise alerts, and every hour fetch launch info and rewrite the report | ~15-20K a day on Robinhood Chain |
+| `python -m sniper collect [--minutes N] [--max-credits N]` | discover launches, record launch tapes, snapshot outcomes, raise alerts, and every hour fetch launch info and rewrite the report | ~15-25K a day on Robinhood Chain, capped by `max_credits_per_day` |
 | `python -m sniper leaderboard` | print serial wallets by class, and packs | 0 |
 | `python -m sniper report [--handle you]` | write `reports/serial-snipers.md` | 0 |
 | `python -m sniper enrich` | developer and launchpad info for launches that drew serial wallets | 1 per launch |
@@ -95,8 +97,12 @@ window_s: 120            # seconds of trades recorded per launch
 snipe_s: 10              # a buy within this many seconds of the first trade is a snipe
 min_launches: 3          # snipes on this many launches make a wallet serial
 roundtrip_max_s: 30      # a snipe sold within this many seconds is a round trip
+dust_usd: 1.0            # serial wallets with a median snipe below this are dust bots
 pack_max_block_gap: 3    # pack members buy a median of at most this many blocks apart
 snapshot_ages_min: [60, 360, 1440]
+max_credits_per_day: 60000   # counted in the database per UTC day; the collector pauses past it
+analysis_days: 7         # classes, packs and the report look this many days back
+handle: your_x_handle    # utm_content on the CoinGecko links in the report
 ```
 
 ## CoinGecko data vs. what this repo computes
@@ -106,7 +112,7 @@ sender and USD size, pool prices, liquidity and activity, token info (developer 
 launchpad details), and wallet PnL and trade history.
 
 Everything else is computed in this repo from that data: snipe, round trip, serial sniper,
-round-tripper, serial launcher, packs, alive, and the price multiples. These are editable
+round-tripper, dust bot, serial launcher, packs, alive, and the price multiples. These are editable
 inferences, not CoinGecko API fields, official classifications or judgments about anyone behind
 a wallet. Read the raw trades before you build a claim on a label.
 
@@ -115,10 +121,24 @@ a wallet. Read the raw trades before you build a claim on a label.
 - **Trades are attributed to the transaction sender.** Addresses starting with `0x4337` are
   ERC-4337 bundlers submitting other users' trades, so they are set aside. Smart-account snipers
   routed through a bundler are not counted.
-- **The tracker only sees launches while it runs.** Launch tapes are recorded about 3.5 minutes
+- **What counts as a launch.** A token's first pool. Extra pools of a token that already had one
+  (fee tiers, post-graduation pools) are stored as `secondary` and skipped. Pools whose trading
+  opens minutes after creation are re-anchored on their first trade, using the pool's first minute
+  candle.
+- **Same-transaction legs.** Hook pools (e.g. Bankr) report a small opposite-side swap next to
+  every trade, and some pons-v2 router calls show the sender both buying and selling. When one
+  sender has a buy and a sell in the same transaction, only the larger side is kept. Otherwise
+  every such trade would look like a 0-second round trip.
+- **Busy launches.** Trades are fetched in 15-second slices moving forward in time, so if a very
+  busy launch hits the page cap, only the end of its window is cut, never the opening. Cut tapes
+  are re-captured once with a bigger budget and left out of the stats if they are still cut.
+- **The tracker only sees launches while it runs.** Launch tapes are recorded about 4.5 minutes
   after each pool is created. The collector pages new pools until it reaches pools it has already
-  seen, so short restarts leave no gaps. Wallet trade history reaches back about a week, so run
-  `profile` while the launches are fresh.
+  seen, and every third sweep it goes 15 minutes deep to catch pools that were indexed late, so
+  short restarts leave no gaps. Snapshots are only kept if they were taken on time. Wallet trade
+  history reaches back about a week, so run `profile` while the launches are fresh.
+- **"Alive" uses the 30-minute counter up to +2h.** The hourly trade counter still includes the
+  launch trades an hour later, which would make almost every pool look alive at +1h.
 - **Multiples are not PnL.** A multiple compares a later pool price with the average price paid in
   the snipe window. It is not what any wallet realized.
 - **Other chains**: set `chains` to any GeckoTerminal network id. Ethereum, Base, BNB Chain,
@@ -137,8 +157,9 @@ Ask Claude Code or Codex:
 
 This project is a fork of CoinGecko's
 [onchain-signal-bot](https://github.com/cg-brianlsh/onchain-signal-bot) starter, and the original
-paper-trading bot still ships here unchanged (`bot/`, `strategies/`). See
-[docs/onchain-signal-bot.md](docs/onchain-signal-bot.md).
+paper-trading bot still ships here (`bot/`, `strategies/`). The only change to the shared `core/`
+is in `core/client.py`: it now retries 5xx responses and bounds its in-memory response cache for
+long runs. See [docs/onchain-signal-bot.md](docs/onchain-signal-bot.md).
 
 ## Links
 

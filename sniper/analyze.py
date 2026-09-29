@@ -1,16 +1,21 @@
 """Pure analysis over recorded launch tapes. No network calls, so every threshold can be replayed offline.
 
-Everything this module outputs (snipe, round trip, serial sniper, round-tripper, serial launcher,
-pack, alive) is a label this repo computes from CoinGecko API trade and pool data. None of them are
-CoinGecko API fields.
+Everything this module outputs (snipe, round trip, serial sniper, round-tripper, dust bot, serial
+launcher, pack, alive) is a label this repo computes from CoinGecko API trade and pool data. None of
+them are CoinGecko API fields.
+
+Typical use:
+    pools, trades = prepare(store.all_pools(), store.all_trades(), cfg)   # eligible launches, cleaned trades
+    stats = wallet_stats(trades, pools, cfg, info=store.launch_info())
 """
 import statistics
 from collections import defaultdict
 from datetime import datetime
 
-from .config import SniperConfig
+from .config import SniperConfig, snapshot_tolerance_min
 
-SERIAL_CLASSES = ("serial_sniper", "round_tripper", "serial_launcher")
+SERIAL_CLASSES = ("serial_sniper", "round_tripper", "dust_bot", "serial_launcher")
+BOT_CLASSES = ("round_tripper", "dust_bot")
 
 
 def _f(x, default=None):
@@ -58,23 +63,38 @@ def parse_pool(pool_row: dict) -> dict | None:
 def pool_snapshot(pool_row: dict) -> dict:
     """A pools/multi API row -> outcome fields for a snapshot."""
     a = pool_row.get("attributes") or {}
-    tx = ((a.get("transactions") or {}).get("h1")) or {}
+    txs = a.get("transactions") or {}
+
+    def count(window):
+        w = txs.get(window) or {}
+        return (w.get("buys") or 0) + (w.get("sells") or 0)
+
     return {
         "price_usd": _f(a.get("base_token_price_usd")),
         "reserve_usd": _f(a.get("reserve_in_usd")),
         "fdv_usd": _f(a.get("fdv_usd")),
-        "trades_h1": (tx.get("buys") or 0) + (tx.get("sells") or 0),
+        "trades_h1": count("h1"),
+        "trades_m30": count("m30"),
+        "trades_m15": count("m15"),
         "volume_h1": _f((a.get("volume_usd") or {}).get("h1")),
         "buys_h24": (((a.get("transactions") or {}).get("h24")) or {}).get("buys") or 0,
     }
 
 
-def build_tape(rows: list[dict], created_ts: float, window_s: int, truncated: bool = False) -> dict:
+def build_tape(rows: list[dict], created_ts: float, window_s: int, truncated: bool = False, anchor: str = "created") -> dict:
     """Raw trades/range rows for one pool -> the launch tape: every trade in the first `window_s`
-    seconds after creation, with block and second offsets from the pool's first trade.
+    seconds after creation (anchor="created") or after the first trade (anchor="first_trade", for
+    pools whose trading opened late), with block and second offsets from the pool's first trade.
 
     Offsets are measured from the first indexed trade, not from the creation timestamp, because the
-    creation block usually carries the deployer's own first buy and that is the natural "block 0"."""
+    creation block usually carries the deployer's own first buy and that is the natural "block 0".
+    Rows are stored as-is (fee legs included) so the raw tape can always be re-analyzed;
+    `drop_fee_legs` cleans them at analysis time."""
+    cut = created_ts + window_s
+    if anchor == "first_trade":
+        opens = [iso_ts(r.get("block_timestamp")) for r in rows if r.get("kind") in ("buy", "sell")]
+        opens = [t for t in opens if t is not None]
+        cut = (min(opens) if opens else created_ts) + window_s
     merged: dict[tuple, dict] = {}
     for r in rows:
         kind = r.get("kind")
@@ -83,7 +103,7 @@ def build_tape(rows: list[dict], created_ts: float, window_s: int, truncated: bo
         ts = iso_ts(r.get("block_timestamp"))
         block = r.get("block_number")
         wallet = (r.get("tx_from_address") or "").lower()
-        if ts is None or block is None or not wallet or ts > created_ts + window_s:
+        if ts is None or block is None or not wallet or ts > cut:
             continue
         amount = _f(r.get("to_token_amount") if kind == "buy" else r.get("from_token_amount"), 0.0)
         key = (r.get("tx_hash"), wallet, kind)
@@ -111,6 +131,63 @@ def build_tape(rows: list[dict], created_ts: float, window_s: int, truncated: bo
     return {"launch_block": launch_block, "launch_ts": launch_ts, "trades": trades, "truncated": truncated}
 
 
+# ---- cleaning and eligibility ----
+
+
+def drop_fee_legs(trades: list[dict], cfg: SniperConfig) -> list[dict]:
+    """Collapses a sender's opposite-side rows inside ONE transaction to the dominant side.
+
+    Two protocol patterns produce them. Uniswap v4 hook pools (e.g. Bankr) emit a small swap in the
+    other direction next to every trade (a $264 buy with a $3 "sell"). Pons-v2 router calls can sell
+    tokens pulled from a third-party address and hand the proceeds to the sender, who then shows both
+    a buy and a sell. Neither is the sender buying and selling. Left in, every such trade looks like a
+    0-second round trip, and a pure seller looks like a sniper. The side with the larger USD value is
+    kept (the buy on a tie)."""
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for t in trades:
+        groups[(t["chain"], t["pool"], t["tx_hash"], t["wallet"])].append(t)
+    out = []
+    for rows in groups.values():
+        buys = [r for r in rows if r["kind"] == "buy"]
+        sells = [r for r in rows if r["kind"] == "sell"]
+        if buys and sells:
+            b, s = sum(r["usd"] or 0 for r in buys), sum(r["usd"] or 0 for r in sells)
+            rows = buys if b >= s else sells
+        out += rows
+    return out
+
+
+def eligible_launches(pools: list[dict]) -> dict[tuple, dict]:
+    """Captured, complete launch tapes of each token's FIRST pool.
+
+    Excluded: truncated tapes (the earliest trades are missing, so block 0 would be wrong) and extra
+    pools of a token that already had a pool (fee-tier or post-graduation pools are not launches)."""
+    first_pool: dict[tuple, tuple] = {}
+    for p in sorted(pools, key=lambda p: p["created_ts"]):
+        if p.get("token"):
+            first_pool.setdefault((p["chain"], p["token"]), (p["chain"], p["pool"]))
+    out = {}
+    for p in pools:
+        if p.get("status") != "captured" or p.get("truncated"):
+            continue
+        if p.get("token") and first_pool.get((p["chain"], p["token"])) != (p["chain"], p["pool"]):
+            continue
+        out[(p["chain"], p["pool"])] = p
+    return out
+
+
+def prepare(pools: list[dict], trades: list[dict], cfg: SniperConfig, since: float | None = None, until: float | None = None) -> tuple[list[dict], list[dict]]:
+    """(eligible launches, their cleaned trades), optionally limited to launches created in [since, until)."""
+    elig = eligible_launches(pools)
+    if since is not None or until is not None:
+        elig = {k: p for k, p in elig.items() if (since is None or p["created_ts"] >= since) and (until is None or p["created_ts"] < until)}
+    trades = [t for t in trades if (t["chain"], t["pool"]) in elig]
+    return list(elig.values()), drop_fee_legs(trades, cfg)
+
+
+# ---- per-launch positions and wallet classes ----
+
+
 def is_bundler(wallet: str, cfg: SniperConfig) -> bool:
     w = wallet.lower()
     return any(w.startswith(p.lower()) for p in cfg.bundler_prefixes)
@@ -122,18 +199,25 @@ def snipe_rows(trades: list[dict], cfg: SniperConfig) -> list[dict]:
 
 
 def observation_hours(pools: list[dict]) -> float:
-    captured = [p["created_ts"] for p in pools if p.get("status") == "captured"]
-    if len(captured) < 2:
+    created = [p["created_ts"] for p in pools]
+    if len(created) < 2:
         return 0.0
-    return (max(captured) - min(captured)) / 3600
+    return (max(created) - min(created)) / 3600
 
 
-def launch_positions(trades: list[dict], cfg: SniperConfig) -> dict[tuple, dict]:
+def _developer_of(info: dict | None, key: tuple) -> str | None:
+    dev = ((info or {}).get(key) or {}).get("developer")
+    return dev.lower() if dev else None
+
+
+def launch_positions(trades: list[dict], cfg: SniperConfig, pools: list[dict] | None = None, info: dict | None = None) -> dict[tuple, dict]:
     """(chain, pool, wallet) -> what that wallet did in that launch's tape, for every sniping wallet.
 
-    A *round trip* is a snipe followed by the same wallet's first sell in that pool within
-    `roundtrip_max_s` seconds. Round trips at a net loss, launch after launch, are the footprint of
-    activity/volume bots rather than of someone trying to profit from the launch."""
+    `launcher` marks the wallet as the launch's creator: it is the token's developer_address when
+    token info knows it; otherwise it bought in block 0 AND block 0 is the pool's creation block
+    (first trade within `creation_block_s` of pool creation). A wallet that buys in block 0 of a pool
+    whose developer is someone else is a sniper, not a launcher."""
+    meta = {(p["chain"], p["pool"]): p for p in (pools or [])}
     buys: dict[tuple, list[dict]] = defaultdict(list)
     sells: dict[tuple, list[dict]] = defaultdict(list)
     for t in trades:
@@ -144,29 +228,54 @@ def launch_positions(trades: list[dict], cfg: SniperConfig) -> dict[tuple, dict]
         snipes = [b for b in bs if b["sec_offset"] <= cfg.snipe_s]
         if not snipes:
             continue
+        launch = (key[0], key[1])
+        block0 = any(b["block_offset"] == 0 for b in snipes)
+        dev = _developer_of(info, launch)
+        if dev:
+            launcher = key[2] == dev
+        else:
+            p = meta.get(launch) or {}
+            at_creation = p.get("launch_ts") is not None and p.get("created_ts") is not None and p["launch_ts"] - p["created_ts"] <= cfg.creation_block_s
+            launcher = block0 and at_creation
         first_buy = min(b["ts"] for b in snipes)
         ss = sorted(sells.get(key, []), key=lambda s: s["ts"])
         later = [s for s in ss if s["ts"] >= first_buy]
-        first_sell = later[0]["ts"] if later else None
-        hold = (first_sell - first_buy) if first_sell is not None else None
-        buy_usd = sum(b["usd"] for b in bs)
-        sell_usd = sum(s["usd"] for s in ss)
+        hold = (later[0]["ts"] - first_buy) if later else None
         out[key] = {
             "snipes": snipes,
-            "block0": any(b["block_offset"] == 0 for b in snipes),
+            "block0": block0,
+            "launcher": launcher,
             "blocks": {b["block"] for b in snipes},
-            "sold": bool(ss),
+            "sold": bool(later),
             "round_trip": hold is not None and hold <= cfg.roundtrip_max_s,
             "hold_s": hold,
-            "buy_usd": buy_usd,
-            "sell_usd": sell_usd,
+            "buy_usd": sum(b["usd"] for b in bs),
+            "sell_usd": sum(s["usd"] for s in ss),
         }
     return out
 
 
-def wallet_stats(trades: list[dict], pools: list[dict], cfg: SniperConfig) -> dict[str, dict]:
-    """Per-wallet snipe record and a code-derived class for every wallet that sniped at least once."""
-    positions = launch_positions(trades, cfg)
+def _not_profitable(positions: list[dict], cfg: SniperConfig) -> bool:
+    """Net loss or break-even (within `breakeven_tolerance` of what was bought) across positions."""
+    bought = sum(p["buy_usd"] for p in positions)
+    net = sum(p["sell_usd"] - p["buy_usd"] for p in positions)
+    return net <= cfg.breakeven_tolerance * bought
+
+
+def wallet_stats(trades: list[dict], pools: list[dict], cfg: SniperConfig, info: dict | None = None) -> dict[str, dict]:
+    """Per-wallet snipe record and a code-derived class for every wallet that sniped at least once.
+    Pass the output of `prepare()`: eligible launches and cleaned trades.
+
+    Classes, first match wins:
+      bundler          ERC-4337 bundler address (submits other people's trades)
+      one_off          fewer than `min_launches` sniped launches
+      serial_launcher  the launch's creator in most of its launches (see launch_positions)
+      dust_bot         median snipe below `dust_usd`
+      round_tripper    sells within `roundtrip_max_s` in >= `roundtrip_min_rate` of its launches, or sells
+                       on a fixed timer, and does not make money doing it: paying to be in the buyer list
+      serial_sniper    everything else that snipes >= `min_launches` launches
+    """
+    positions = launch_positions(trades, cfg, pools, info)
     hours = observation_hours(pools)
     by_wallet: dict[str, list[tuple]] = defaultdict(list)
     for (chain, pool, wallet), pos in positions.items():
@@ -175,11 +284,20 @@ def wallet_stats(trades: list[dict], pools: list[dict], cfg: SniperConfig) -> di
     out = {}
     for wallet, items in by_wallet.items():
         n = len(items)
-        snipes = [s for _, _, pos in items for s in pos["snipes"]]
-        block0 = sum(1 for _, _, pos in items if pos["block0"])
-        trips = [pos for _, _, pos in items if pos["round_trip"]]
+        poss = [pos for _, _, pos in items]
+        snipes = [s for pos in poss for s in pos["snipes"]]
+        trips = [p for p in poss if p["round_trip"]]
+        sold = [p for p in poss if p["sold"]]
+        holds = [p["hold_s"] for p in sold]
+        median_hold = statistics.median(holds) if holds else None
+        timer = (
+            len(sold) >= cfg.min_launches
+            and len(sold) / n >= cfg.roundtrip_min_rate
+            and sum(1 for h in holds if abs(h - median_hold) <= cfg.timer_tolerance_s) / len(holds) >= 0.8
+        )
         rt_rate = len(trips) / n
-        trip_cost = round(sum(p["buy_usd"] - p["sell_usd"] for p in trips), 2)
+        launcher_n = sum(1 for p in poss if p["launcher"])
+        median_snipe = statistics.median(s["usd"] for s in snipes)
         rate = n / hours if hours >= 0.25 else None
         if is_bundler(wallet, cfg):
             label = "bundler"
@@ -187,29 +305,30 @@ def wallet_stats(trades: list[dict], pools: list[dict], cfg: SniperConfig) -> di
             label = "infrastructure"
         elif n < cfg.min_launches:
             label = "one_off"
-        elif block0 / n >= 0.5:
+        elif launcher_n / n >= 0.5:
             label = "serial_launcher"
-        elif rt_rate >= cfg.roundtrip_min_rate and trip_cost >= 0:
-            # Buying and dumping within seconds AND losing money on it: paying to be in the buyer list.
-            # Fast flips that make money stay serial snipers.
+        elif median_snipe < cfg.dust_usd:
+            label = "dust_bot"
+        elif (rt_rate >= cfg.roundtrip_min_rate and _not_profitable(trips, cfg)) or (timer and _not_profitable(sold, cfg)):
             label = "round_tripper"
         else:
             label = "serial_sniper"
-        holds = [pos["hold_s"] for _, _, pos in items if pos["hold_s"] is not None]
         out[wallet] = {
             "wallet": wallet,
             "label": label,
             "launches": n,
-            "block0_launches": block0,
+            "launcher_launches": launcher_n,
+            "block0_launches": sum(1 for p in poss if p["block0"]),
             "round_trips": len(trips),
             "round_trip_rate": round(rt_rate, 3),
-            "round_trip_cost_usd": trip_cost,
-            "sold_in_window": sum(1 for _, _, pos in items if pos["sold"]),
-            "median_hold_in_window_s": round(statistics.median(holds), 1) if holds else None,
+            "round_trip_cost_usd": round(sum(p["buy_usd"] - p["sell_usd"] for p in trips), 2),
+            "timer_seller": timer,
+            "sold_in_window": len(sold),
+            "median_hold_in_window_s": round(median_hold, 1) if median_hold is not None else None,
             "median_sec_offset": round(statistics.median(s["sec_offset"] for s in snipes), 1),
             "median_block_offset": statistics.median(s["block_offset"] for s in snipes),
             "snipe_usd": round(sum(s["usd"] for s in snipes), 2),
-            "median_snipe_usd": round(statistics.median(s["usd"] for s in snipes), 2),
+            "median_snipe_usd": round(median_snipe, 2),
             "chains": sorted({c for c, _, _ in items}),
             "first_ts": min(s["ts"] for s in snipes),
             "last_ts": max(s["ts"] for s in snipes),
@@ -238,9 +357,9 @@ def find_packs(trades: list[dict], stats: dict[str, dict], cfg: SniperConfig) ->
     Linked wallets are merged into packs (union-find). `same_block_rate` is the share of the pack's
     shared launches in which two or more members bought in the very same block.
 
-    Launch-block buyers (usually the developer) are left out: their link to a launch is creating it,
-    not sniping it. The report ties them to round-trippers separately, through developer_address."""
-    serial = wallets_with(stats, "serial_sniper", "round_tripper")
+    Launchers are left out: their link to a launch is creating it, not sniping it. The report ties
+    them to round-trippers separately, through developer_address."""
+    serial = wallets_with(stats, "serial_sniper", "round_tripper", "dust_bot")
     positions = launch_positions(trades, cfg)
     per_launch: dict[tuple, dict[str, set[int]]] = defaultdict(dict)
     for (chain, pool, wallet), pos in positions.items():
@@ -311,14 +430,29 @@ def find_packs(trades: list[dict], stats: dict[str, dict], cfg: SniperConfig) ->
     return sorted(packs, key=lambda p: (-p["shared_launches"], -p["size"]))
 
 
-def launch_outcomes(pools: list[dict], trades: list[dict], snapshots: list[dict], stats: dict[str, dict], cfg: SniperConfig) -> list[dict]:
-    """Per captured launch: who sniped it and what the pool looked like at each snapshot age.
+def is_alive(snap: dict, age_min: int, cfg: SniperConfig) -> bool | None:
+    """Did the pool trade recently at snapshot time? None when the snapshot can't tell.
 
-    `snipe_vwap` is the average price paid inside the snipe window by everyone except round-trippers
-    and bundlers, the reference for `multiple_<age>m` = snapshot price / snipe_vwap."""
-    snipers = wallets_with(stats, "serial_sniper", "serial_launcher")
+    Up to +2h the API's h1 counter still includes the launch trades themselves (it is bucketed, not
+    a precise rolling hour), so a pool that died after its first minute reads as active. Early ages
+    use the 30-minute counter instead, which cannot contain the launch."""
+    if age_min <= 120:
+        m30 = snap.get("trades_m30")
+        return None if m30 is None else m30 >= cfg.alive_min_trades_h1
+    return (snap.get("trades_h1") or 0) >= cfg.alive_min_trades_h1
+
+
+def launch_outcomes(pools: list[dict], trades: list[dict], snapshots: list[dict], stats: dict[str, dict], cfg: SniperConfig, buyer_counts: dict | None = None) -> list[dict]:
+    """Per eligible launch: who sniped it and what the pool looked like at each snapshot age.
+
+    `snipe_vwap` is the average price paid inside the snipe window by everyone except bots,
+    bundlers and launchers: the reference for `multiple_<age>m` = snapshot price / snipe_vwap.
+    Snapshots taken more than snapshot_tolerance_min(age) late are ignored. `buyer_counts`
+    ((chain, pool) -> distinct buyers in the tape) is used when `trades` holds only snipers' rows."""
+    snipers = wallets_with(stats, "serial_sniper")
+    bots = wallets_with(stats, *BOT_CLASSES)
     trippers = wallets_with(stats, "round_tripper")
-    bundlers = wallets_with(stats, "bundler")
+    skip = bots | wallets_with(stats, "bundler", "serial_launcher")
     by_launch: dict[tuple, list[dict]] = defaultdict(list)
     for t in trades:
         by_launch[(t["chain"], t["pool"])].append(t)
@@ -328,16 +462,14 @@ def launch_outcomes(pools: list[dict], trades: list[dict], snapshots: list[dict]
 
     out = []
     for p in pools:
-        if p.get("status") != "captured":
-            continue
         key = (p["chain"], p["pool"])
         rows = by_launch.get(key, [])
         snipes = snipe_rows(rows, cfg)
-        priced = [s for s in snipes if s["wallet"] not in trippers and s["wallet"] not in bundlers] or snipes
+        priced = [s for s in snipes if s["wallet"] not in skip] or snipes
         qty = sum(s["token_amount"] for s in priced)
         vwap = (sum(s["usd"] for s in priced) / qty) if qty else None
         buyers = {t["wallet"] for t in rows if t["kind"] == "buy"}
-        tripper_here = sorted(buyers & trippers)
+        n_buyers = max(len(buyers), (buyer_counts or {}).get(key, 0))
         rec = {
             "chain": p["chain"],
             "pool": p["pool"],
@@ -345,20 +477,24 @@ def launch_outcomes(pools: list[dict], trades: list[dict], snapshots: list[dict]
             "dex": p.get("dex"),
             "token": p.get("token"),
             "created_ts": p["created_ts"],
-            "buyers_window": len(buyers),
-            "real_buyers_window": len(buyers - trippers - bundlers),
-            "round_tripper_share": round(len(tripper_here) / len(buyers), 3) if buyers else 0.0,
+            "buyers_window": n_buyers,
+            "real_buyers_window": n_buyers - len(buyers & skip),
+            "bot_share": round(len(buyers & bots) / n_buyers, 3) if n_buyers else 0.0,
+            "round_tripper_share": round(len(buyers & trippers) / n_buyers, 3) if n_buyers else 0.0,
             "snipers": len({s["wallet"] for s in snipes}),
             "serial_snipers": sorted({s["wallet"] for s in snipes if s["wallet"] in snipers}),
-            "round_trippers": tripper_here,
+            "round_trippers": sorted(buyers & trippers),
             "snipe_usd": round(sum(s["usd"] for s in snipes), 2),
             "snipe_vwap": vwap,
         }
         for age in cfg.snapshot_ages_min:
             s = snaps.get(key, {}).get(age)
-            if not s:
+            if not s or (s["ts"] - p["created_ts"]) / 60 - age > snapshot_tolerance_min(age):
                 continue
-            rec[f"alive_{age}m"] = (s.get("trades_h1") or 0) >= cfg.alive_min_trades_h1
+            alive = is_alive(s, age, cfg)
+            if alive is None:
+                continue
+            rec[f"alive_{age}m"] = alive
             rec[f"multiple_{age}m"] = (s["price_usd"] / vwap) if (vwap and s.get("price_usd") is not None) else None
             rec[f"reserve_{age}m"] = s.get("reserve_usd")
         out.append(rec)
@@ -395,3 +531,17 @@ def sniper_track_record(wallet: str, outcomes: list[dict], age: int) -> dict:
         "alive_pct": round(100 * sum(1 for r in rows if r[f"alive_{age}m"]) / len(rows), 1) if rows else None,
         "median_multiple": round(statistics.median(mults), 3) if mults else None,
     }
+
+
+def daily_windows(pools: list[dict], day_s: int = 86400) -> list[tuple[float, float]]:
+    """Consecutive UTC-day windows [start, end) covering the launches, oldest first."""
+    if not pools:
+        return []
+    first = min(p["created_ts"] for p in pools)
+    last = max(p["created_ts"] for p in pools)
+    start = first - (first % day_s)
+    out = []
+    while start <= last:
+        out.append((start, start + day_s))
+        start += day_s
+    return out

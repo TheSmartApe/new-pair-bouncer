@@ -12,6 +12,8 @@ import statistics
 from core.client import CoinGeckoClient, CoinGeckoError
 from core.wallets import fifo_matches, match_metrics, normalize_trades
 
+NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
 
 def _hold_summary(closed: list[dict]) -> dict:
     m = match_metrics(closed)
@@ -25,10 +27,24 @@ async def profile_wallet(client: CoinGeckoClient, wallet: str, chains: list[str]
     try:
         pnl = await client.get(f"/onchain/wallets/{wallet}/pnl", {"networks": ",".join(chains)}, ttl=300)
         a = (pnl.get("data") or {}).get("attributes") or {}
+        stats = a.get("token_stats") or []
+        sniped = {t.lower() for t in sniped_tokens if t}
+
+        def realized(rows):
+            return round(sum(float(r.get("realized_pnl_usd") or 0) for r in rows), 2)
+
+        # total_realized_pnl_usd includes the wallet's ETH/WETH entry, which can dwarf (and flip the
+        # sign of) what it made on tokens. Report the token-only and sniped-token figures next to it.
+        tokens_only = [r for r in stats if (r.get("address") or "").lower() != NATIVE and (r.get("symbol") or "").upper() not in ("ETH", "WETH")]
+        on_snipes = [r for r in stats if (r.get("address") or "").lower() in sniped]
         out["coingecko_pnl"] = {
             "total_tokens": a.get("total_tokens"),
             "total_realized_pnl_usd": a.get("total_realized_pnl_usd"),
             "total_unrealized_pnl_usd": a.get("total_unrealized_pnl_usd"),
+            "realized_excl_eth_usd": realized(tokens_only),
+            "realized_on_sniped_tokens_usd": realized(on_snipes),
+            "sniped_tokens_in_pnl": len(on_snipes),
+            "token_stats_returned": len(stats),
         }
     except CoinGeckoError as exc:
         out["coingecko_pnl"] = {"error": str(exc)[:160]}

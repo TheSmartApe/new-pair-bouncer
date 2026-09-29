@@ -10,6 +10,13 @@ from .profile import enrich_launches, profile_many
 from .store import Store
 
 
+def _load(store, cfg):
+    since = __import__('time').time() - cfg.analysis_days * 86400 if cfg.analysis_days else None
+    data = store.load_for_analysis(cfg.snipe_s, since=since)
+    pools, trades = analyze.prepare(data['pools'], data['trades'], cfg, since=data.get('since') or None)
+    return data, pools, trades
+
+
 def _cfg(args) -> SniperConfig:
     cfg = SniperConfig.load(Path(args.config) if args.config else None)
     if getattr(args, "chains", None):
@@ -35,17 +42,17 @@ def cmd_collect(args):
 def cmd_leaderboard(args):
     cfg = _cfg(args)
     store = Store(Path(args.db))
-    trades = store.all_trades()
-    stats = analyze.wallet_stats(trades, store.all_pools(), cfg)
+    data, pools, trades = _load(store, cfg)
+    stats = analyze.wallet_stats(trades, pools, cfg, info=data["info"])
     for label in analyze.SERIAL_CLASSES:
         rows = sorted((s for s in stats.values() if s["label"] == label), key=lambda s: (-s["launches"], s["median_sec_offset"]))
         if not rows:
             continue
         print(f"\n{label} ({len(rows)})")
-        print(f"{'wallet':44} {'launches':>8} {'blk0':>5} {'speed':>7} {'median $':>9} {'total $':>10} {'sold':>5} {'trips':>5} {'hold':>7}")
+        print(f"{'wallet':44} {'launches':>8} {'creator':>7} {'speed':>7} {'median $':>9} {'total $':>10} {'sold':>5} {'trips':>5} {'hold':>7}")
         for s in rows[: args.top]:
             hold = "-" if s["median_hold_in_window_s"] is None else f"{s['median_hold_in_window_s']:.0f}s"
-            print(f"{s['wallet']:44} {s['launches']:>8} {s['block0_launches']:>5} {'+' + format(s['median_sec_offset'], '.0f') + 's':>7} {s['median_snipe_usd']:>9,.2f} {s['snipe_usd']:>10,.2f} {s['sold_in_window']:>5} {s['round_trips']:>5} {hold:>7}")
+            print(f"{s['wallet']:44} {s['launches']:>8} {s['launcher_launches']:>7} {'+' + format(s['median_sec_offset'], '.0f') + 's':>7} {s['median_snipe_usd']:>9,.2f} {s['snipe_usd']:>10,.2f} {s['sold_in_window']:>5} {s['round_trips']:>5} {hold:>7}")
     packs = analyze.find_packs(trades, stats, cfg)
     if packs:
         print(f"\n{len(packs)} pack(s):")
@@ -56,7 +63,8 @@ def cmd_leaderboard(args):
 def cmd_profile(args):
     cfg = _cfg(args)
     store = Store(Path(args.db))
-    stats = analyze.wallet_stats(store.all_trades(), store.all_pools(), cfg)
+    data, pools, trades = _load(store, cfg)
+    stats = analyze.wallet_stats(trades, pools, cfg, info=data["info"])
     rows = []
     for label in ("serial_sniper", "round_tripper"):
         rows += sorted((s for s in stats.values() if s["label"] == label), key=lambda s: -s["launches"])[: args.top]
@@ -72,10 +80,12 @@ def cmd_enrich(args):
     """token_info for launches that drew serial wallets and haven't been enriched yet."""
     cfg = _cfg(args)
     store = Store(Path(args.db))
-    stats = analyze.wallet_stats(store.all_trades(), store.all_pools(), cfg)
-    outcomes = analyze.launch_outcomes(store.all_pools(), store.all_trades(), store.all_snapshots(), stats, cfg)
-    done = store.launch_info()
-    todo = [o for o in outcomes if (o["round_trippers"] or o["serial_snipers"]) and (o["chain"], o["pool"]) not in done][: args.max_launches]
+    data, pools, trades = _load(store, cfg)
+    done = data["info"]
+    stats = analyze.wallet_stats(trades, pools, cfg, info=done)
+    serial = analyze.serial_wallets(stats)
+    touched = {(t["chain"], t["pool"]) for t in trades if t["wallet"] in serial}
+    todo = [p for p in pools if (p["chain"], p["pool"]) in touched and (p["chain"], p["pool"]) not in done][: args.max_launches]
     results, credits = asyncio.run(enrich_launches(todo))
     for r in results:
         if "error" not in r:

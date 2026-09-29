@@ -72,7 +72,10 @@ class TTLCache:
         return None
 
     def put(self, key: str, value: Any):
-        self._store[key] = (time.monotonic(), value)
+        now = time.monotonic()
+        if len(self._store) > 5000:  # long-running processes: drop entries older than an hour
+            self._store = {k: v for k, v in self._store.items() if now - v[0] < 3600}
+        self._store[key] = (now, value)
 
 
 def _cache_key(path: str, params: dict | None) -> str:
@@ -130,7 +133,7 @@ class CoinGeckoClient:
                         await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
                         continue
                     raise NetworkError(exc) from exc
-                if response.status_code == 429 and attempt < config.MAX_RETRIES - 1:
+                if (response.status_code == 429 or response.status_code >= 500) and attempt < config.MAX_RETRIES - 1:
                     await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
                     continue
                 break

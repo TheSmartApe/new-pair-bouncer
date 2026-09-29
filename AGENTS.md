@@ -10,7 +10,7 @@ This repo has two parts:
 
 ```
 sniper/config.py    every tunable, loaded from sniper.yaml
-sniper/store.py     SQLite (WAL): pools, trades, snapshots, wallets, launch_info, alerts; live_serial() SQL mirror
+sniper/store.py     SQLite (WAL): pools, trades, snapshots, wallets, launch_info, alerts, wallet_classes, meta (credits/day)
 sniper/analyze.py   pure, offline: launch tapes, wallet classes, packs, outcomes (all code-derived labels)
 sniper/collect.py   the 24/7 loop: discover -> capture launch tapes -> snapshots -> alerts -> hourly housekeeping
 sniper/profile.py   wallet PnL + trade-history profiles, token info enrichment
@@ -23,8 +23,11 @@ tests/test_sniper_analyze.py  offline tests; no network calls
 
 - The collector stores raw launch tapes; thresholds are applied at analysis time. Keep it that way
   so `report` can replay new thresholds without spending credits.
-- `store.live_serial()` must keep producing the same classes as `analyze.wallet_stats()`
-  (`test_live_sql_classes_match_python` guards this). Change both together.
+- Always analyze through `analyze.prepare()`: it keeps each token's first complete pool and collapses
+  same-transaction buy/sell legs. Live alerts read the `wallet_classes` cache that the hourly job
+  (`collect.analysis_job`, run in a worker thread) refreshes from `wallet_stats()`.
+- `store.load_for_analysis()` loads only the trades of (pool, wallet) pairs that sniped, over the last
+  `analysis_days`; anything that needs other rows must add them there deliberately (memory).
 - Never present a class, pack, multiple or score as a CoinGecko API field.
 
 ## Onchain Signal Bot (the starter)
