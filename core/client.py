@@ -133,7 +133,7 @@ class CoinGeckoClient:
                         await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
                         continue
                     raise NetworkError(exc) from exc
-                if (response.status_code == 429 or response.status_code >= 500) and attempt < config.MAX_RETRIES - 1:
+                if (response.status_code in (408, 429) or response.status_code >= 500) and attempt < config.MAX_RETRIES - 1:
                     await asyncio.sleep(config.BACKOFF_BASE_S * (attempt + 1))
                     continue
                 break
