@@ -447,6 +447,10 @@ class Store:
             (ts, exit_price, reason, pnl_usd, chain, pool, book),
         )
 
+    def pool_name(self, chain: str, pool: str) -> str:
+        row = self.db.execute("SELECT name FROM pools WHERE chain=? AND pool=?", (chain, pool)).fetchone()
+        return (row[0] if row else None) or pool[:10]
+
     def paper_rows(self) -> list[dict]:
         return [dict(r) for r in self.db.execute("SELECT * FROM paper")]
 

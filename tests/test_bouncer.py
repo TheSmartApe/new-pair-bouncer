@@ -228,7 +228,7 @@ def test_rug_ring_fails_on_an_early_buyer_with_a_rug_heavy_past():
     f = checks.tape_features(tape, B, created_ts=T0)
     assert "ringer" in f["early_wallets"]
     found = by_key(checks.stage0(f, Memory(wallet_rugs={"ringer": (5, 3)}), B, reserve_usd=12_000))
-    assert found["rug_ring"].status == FAIL and "3 of 5" in found["rug_ring"].reason
+    assert found["rug_ring"].status == FAIL and "3 of its 5" in found["rug_ring"].reason
     found = by_key(checks.stage0(f, Memory(wallet_rugs={"ringer": (5, 1)}), B, reserve_usd=12_000))  # 20%: under the bar
     assert found["rug_ring"].status == PASS
     late = organic_tape() + [t("ringer", "buy", 400, 90, 30)]  # bought 90s in: not an early buyer

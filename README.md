@@ -105,6 +105,14 @@ cp env.example .env          # add COINGECKO_API_KEY off-screen; keep COINGECKO_
 .venv/Scripts/python -m sniper web                       # dashboard on http://localhost:8765
 ```
 
+In a terminal, `collect` prints a live colored feed: what the bot knows, every verdict with its reason
+(rug ring first), the bouncer's paper exits and a status line per sweep. Redirected to a file, it
+writes plain timestamped lines instead.
+
+Already running the bot in the background? `python -m sniper watch` shows the same live feed from its
+database, spends no credits, and replays the last few verdicts first. Only one collector can run on a
+database at a time: a second one exits with a pointer to `watch`.
+
 Run it unattended so the paper books build a track record:
 
 ```powershell
@@ -142,6 +150,7 @@ doing the buying.
 | command | what it does | credits |
 |---|---|---|
 | `python -m sniper collect [--minutes N]` | find new pairs, record launch tapes, run the checks, paper-trade the verdicts, snapshot outcomes; hourly: refresh the memory, fetch launch info, rewrite the report | ~20-30K a day on Robinhood Chain, capped by `max_credits_per_day` |
+| `python -m sniper watch [--replay 8]` | live colored feed of the running bot's verdicts and paper exits, read-only | 0 |
 | `python -m sniper web [--port 8765]` | live dashboard, read-only | 0 |
 | `python -m sniper backtest-bouncer [--out rows.json]` | walk-forward replay of the checks over every recorded launch | 1 per launch, once (minute candles, cached) |
 | `python -m sniper report` | markdown report: serial snipers, bots, clusters, outcomes | 0 |

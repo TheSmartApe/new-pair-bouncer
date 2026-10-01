@@ -38,7 +38,8 @@ sniper/profile.py   wallet PnL + trade-history profiles, token info enrichment
 sniper/report.py    reports/serial-snipers.md
 sniper/money.py     cash in vs cash out per serial wallet (CoinGecko wallet PnL, paged; FIFO fallback)
 sniper/web.py + sniper/web/  read-only live dashboard (python -m sniper web)
-sniper/cli.py       collect, leaderboard, profile, enrich, money, web, report
+sniper/ui.py        terminal output: colored feed when stdout is a TTY (collect, watch), plain log lines otherwise
+sniper/cli.py       collect, watch, leaderboard, profile, enrich, money, web, report, backtest-bouncer
 scripts/            Windows supervisor (run-forever.cmd, start.ps1, stop.ps1)
 docs/make_architecture.py  renders docs/architecture.png
 tests/test_sniper_analyze.py  offline tests; no network calls

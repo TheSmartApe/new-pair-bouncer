@@ -1,4 +1,4 @@
-"""`python -m sniper <command>`: collect, leaderboard, profile, enrich, report."""
+"""`python -m sniper <command>`: collect, watch, web, backtest-bouncer, leaderboard, profile, enrich, report, money."""
 import argparse
 import asyncio
 import json
@@ -37,6 +37,14 @@ def cmd_collect(args):
         return
     if result == "budget":
         raise SystemExit(3)  # scripts/run-forever.cmd treats exit code 3 as "do not restart"
+    if result == "locked":
+        raise SystemExit(4)
+
+
+def cmd_watch(args):
+    from . import ui
+
+    ui.watch(Path(args.db), _cfg(args), replay=args.replay)
 
 
 def cmd_leaderboard(args):
@@ -146,6 +154,10 @@ def main(argv=None):
     c.add_argument("--interval-s", dest="interval_s", type=int, default=None)
     c.add_argument("--max-credits", type=int, default=None, help="stop before spending more than this many credits")
     c.set_defaults(fn=cmd_collect)
+
+    w = sub.add_parser("watch", help="live colored feed of the running collector's verdicts and paper exits (read-only, 0 credits)")
+    w.add_argument("--replay", type=int, default=8, help="show the last N verdicts first")
+    w.set_defaults(fn=cmd_watch)
 
     commands = (
         ("leaderboard", cmd_leaderboard, "print serial wallets by class, and packs"),

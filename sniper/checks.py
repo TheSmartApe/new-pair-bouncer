@@ -213,7 +213,7 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
     # wash trading
     share = f["roundtrip_volume_share"]
     status = FAIL if share > cfg.max_roundtrip_volume_share else WARN if share > cfg.warn_roundtrip_volume_share else PASS
-    out.append(Check("wash_trading", "wash", status, f"{_pct(share)} of the volume came from wallets that bought and sold within {cfg.roundtrip_s}s ({len(f['roundtrippers'])} wallets)", share))
+    out.append(Check("wash_trading", "wash", status, f"{_pct(share)} of the volume came from wallets that bought and sold within {cfg.roundtrip_s}s ({len(f['roundtrippers'])} wallet{'' if len(f['roundtrippers']) == 1 else 's'})", share))
 
     # rug ring: the strongest check in the backtest. Rugs on this chain come from a recurring ring of
     # wallets (launch wallets plus the bots that snipe their launches), and their addresses repeat.
@@ -225,6 +225,7 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
     if ring:
         worst = max(ring)
         out.append(Check("rug_ring", "clusters", FAIL,
+                         f"1 of the first-{cfg.ring_window_s}s buyers was early in launches that died: {worst[0]} of its {worst[1]}" if len(ring) == 1 else
                          f"{len(ring)} of the first-{cfg.ring_window_s}s buyers were early in launches that died: one of them in {worst[0]} of {worst[1]}", len(ring)))
     else:
         out.append(Check("rug_ring", "clusters", PASS, "none of the first buyers has a record of early buys in launches that died", 0))
@@ -283,7 +284,7 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
 
     # crowd and price path
     status = FAIL if f["buyers"] < cfg.min_buyers else PASS
-    out.append(Check("buyers", "market", status, f"{f['buyers']} unique buyers", f["buyers"]))
+    out.append(Check("buyers", "market", status, f"{f['buyers']} unique buyer{'' if f['buyers'] == 1 else 's'}", f["buyers"]))
     if reserve_usd is not None:
         status = FAIL if reserve_usd < cfg.min_reserve_usd else PASS
         out.append(Check("liquidity", "market", status, f"${reserve_usd:,.0f} of liquidity", round(reserve_usd, 2)))

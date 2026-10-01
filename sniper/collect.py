@@ -12,6 +12,7 @@ Every hour, in a worker thread: refresh wallet classes, rewrite the report, list
 token info; then fetch that info. Credits are counted per UTC day in the database.
 """
 import asyncio
+import os
 import time
 import traceback
 from datetime import datetime, timezone
@@ -19,13 +20,34 @@ from pathlib import Path
 
 from core.client import CoinGeckoClient, CoinGeckoError, CreditBudgetExceeded
 
-from . import analyze
+from . import analyze, ui
 from .config import REPORTS_DIR, SniperConfig
 from .store import Store
 
 
 def _log(msg: str):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    ui.log(msg)
+
+
+def acquire_lock(path: Path):
+    """An OS lock held for the collector's lifetime, so two collectors never write the same database.
+    The OS drops it when the process exits, crash included. Returns the open file, or None if taken."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
 
 
 def _utc_day(ts: float | None = None) -> str:
@@ -254,21 +276,25 @@ async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: 
         counts["captured"] += 1
         if tape["truncated"]:
             return  # no alerts or verdicts from a tape whose end was cut off
-        if bouncer is not None:
-            try:
-                v = await bouncer.evaluate(client, chain, dict(p), tape, act)
-                counts[v.verdict] += 1
-                if v.verdict == "ENTER":
-                    _log(f"ENTER {chain} {p['name']}: passed {len(v.checks)} checks (stage {v.stage}) at ${v.features.get('price_usd') or 0:.8g}")
-            except CreditBudgetExceeded:
-                raise
-            except CoinGeckoError as exc:
-                _log(f"{chain} {p['name']}: checks failed ({str(exc)[:120]}), no verdict")
         hits = {}
         clean = analyze.drop_fee_legs([{**t, "chain": chain, "pool": p["pool"]} for t in tape["trades"]], cfg)
         for t in sorted(clean, key=lambda t: t["block"]):
             if t["kind"] == "buy" and t["sec_offset"] <= cfg.snipe_s and t["wallet"] in serial and t["wallet"] not in hits:
                 hits[t["wallet"]] = t
+        shown = False
+        if bouncer is not None:
+            try:
+                v = await bouncer.evaluate(client, chain, dict(p), tape, act)
+                counts[v.verdict] += 1
+                if ui.PRETTY:
+                    ui.verdict(p["name"], v.to_dict(), snipers=len(hits), snipe_s=cfg.snipe_s, position_usd=bouncer.b.position_usd)
+                    shown = True
+                elif v.verdict == "ENTER":
+                    _log(f"ENTER {chain} {p['name']}: passed {len(v.checks)} checks (stage {v.stage}) at ${v.features.get('price_usd') or 0:.8g}")
+            except CreditBudgetExceeded:
+                raise
+            except CoinGeckoError as exc:
+                _log(f"{chain} {p['name']}: checks failed ({str(exc)[:120]}), no verdict")
         if hits:
             counts["alerts"] += 1
             payload = {
@@ -280,8 +306,12 @@ async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: 
                 ],
             }
             store.save_alert(chain, p["pool"], payload)
-            who = ", ".join(f"{s['wallet'][:10]}.. {s['label']} (+{s['block_offset']} blk, {s['prior_launches']} prior)" for s in payload["snipers"][:4])
-            _log(f"ALERT {chain} {p['name']}: {len(hits)} serial wallet(s) in the first {cfg.snipe_s}s -> {who}")
+            if ui.PRETTY:
+                if not shown:  # otherwise it's already a line under the verdict
+                    ui.snipers_alert(p["name"], len(hits), cfg.snipe_s)
+            else:
+                who = ", ".join(f"{s['wallet'][:10]}.. {s['label']} (+{s['block_offset']} blk, {s['prior_launches']} prior)" for s in payload["snipers"][:4])
+                _log(f"ALERT {chain} {p['name']}: {len(hits)} serial wallet(s) in the first {cfg.snipe_s}s -> {who}")
 
     await asyncio.gather(*(one(p) for p in ready))
     store.commit()
@@ -404,6 +434,11 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
     traceback and the loop carries on at the next sweep; the database is the only state, so a
     restart resumes exactly where it stopped. Credits are counted per UTC day in the database; past
     `max_credits_per_day` the collector pauses until the next UTC day."""
+    lock = acquire_lock(Path(db_path).with_name(Path(db_path).name + ".collect.lock"))
+    if lock is None:
+        _log("another collector is already running on this database (the background bot?). "
+             "watch it live with `python -m sniper watch`, or stop it first (scripts/stop.ps1)")
+        return "locked"
     store = Store(db_path)
     deadline = time.time() + minutes * 60 if minutes else None
     bouncer = None
@@ -414,12 +449,18 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
     async with CoinGeckoClient() as client:
         if max_credits:
             client.max_credits = max_credits
-        _log(f"collecting {', '.join(cfg.chains)} every {cfg.interval_s}s -> {db_path}")
+        if not ui.PRETTY:
+            _log(f"collecting {', '.join(cfg.chains)} every {cfg.interval_s}s -> {db_path}")
         last_housekeeping = time.time()
         sweep = 0
         paused_day = None
         try:
-            _log(f"wallet classes refreshed: {await asyncio.to_thread(lambda: analysis_job(db_path, cfg)['classes'])}")
+            classes = await asyncio.to_thread(lambda: analysis_job(db_path, cfg)["classes"])
+            if ui.PRETTY:
+                ui.banner(cfg, ui.memory_stats(store.db, cfg))
+                ui.log(f"collecting {', '.join(cfg.chains)} every {cfg.interval_s}s · verdicts land as launches get indexed")
+            else:
+                _log(f"wallet classes refreshed: {classes}")
         except Exception:  # noqa: BLE001
             _log("initial class refresh failed, alerts start empty:\n" + traceback.format_exc())
         while True:
@@ -441,6 +482,10 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
                     c = await capture_ready(client, store, chain, cfg, serial, bouncer)
                     snaps = await take_snapshots(client, store, chain, cfg)
                     book = await bouncer.manage_positions(client, chain, pools_multi) if bouncer else {"open": 0, "closed": 0}
+                    if ui.PRETTY:
+                        for e in book.get("exits", []):
+                            if e["book"] == "bouncer":
+                                ui.paper_exit(store.pool_name(chain, e["pool"]), e)
                 except CreditBudgetExceeded:
                     store.add_credits(day, client.credits_used - before)
                     store.commit()
@@ -452,6 +497,10 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
                     continue
                 except Exception:  # noqa: BLE001
                     _log(f"{chain}: unexpected error, retrying next sweep:\n" + traceback.format_exc())
+                    continue
+                if ui.PRETTY:
+                    ui.sweep(chain, sweep, found, c, store.credits_on(day) + client.credits_used - before, time.time() - started,
+                             ui.books_line(store.paper_rows(), bouncer.b) if bouncer else None)
                     continue
                 by_label: dict[str, int] = {}
                 for v in serial.values():
@@ -480,3 +529,4 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
                 wait = min(wait, deadline - time.time())
             await asyncio.sleep(max(5, wait))
     store.close()
+    lock.close()

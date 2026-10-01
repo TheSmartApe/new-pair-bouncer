@@ -180,7 +180,7 @@ class Bouncer:
         closes at its last mark from before the limit, not at today's price."""
         open_rows = self.store.open_positions(chain)
         if not open_rows:
-            return {"open": 0, "closed": 0}
+            return {"open": 0, "closed": 0, "exits": []}
         addresses = sorted({r["pool"] for r in open_rows})
         prices: dict[str, float] = {}
         reserves: dict[str, float | None] = {}
@@ -193,6 +193,7 @@ class Bouncer:
                 reserves[a["address"]] = checks.usable_reserve(snap["reserve_usd"], snap["trades_m30"], self.b)
         now = time.time()
         closed = 0
+        exits = []
         for r in open_rows:
             price = prices.get(r["pool"])
             reserve = reserves.get(r["pool"])
@@ -205,6 +206,7 @@ class Bouncer:
                 pnl = exit_proceeds(r["qty"], exit_price, self.b, exit_reserve) - r["usd"]
                 self.store.close_position(chain, r["pool"], r["book"], now, exit_price, reason, round(pnl, 4))
                 closed += 1
+                exits.append({"pool": r["pool"], "book": r["book"], "pnl": pnl, "usd": r["usd"], "reason": reason, "opened_ts": r["opened_ts"]})
                 continue
             reason = exit_reason(r.get("entry_raw_price") or r["entry_price"], price, r["opened_ts"], now, self.b)
             if reason:
@@ -213,8 +215,9 @@ class Bouncer:
                 pnl = exit_proceeds(r["qty"], exit_price, self.b, exit_reserve) - r["usd"]
                 self.store.close_position(chain, r["pool"], r["book"], now, exit_price, reason if price is not None else f"{reason}_no_price", round(pnl, 4))
                 closed += 1
+                exits.append({"pool": r["pool"], "book": r["book"], "pnl": pnl, "usd": r["usd"], "reason": reason, "opened_ts": r["opened_ts"]})
         self.store.commit()
-        return {"open": len(open_rows) - closed, "closed": closed}
+        return {"open": len(open_rows) - closed, "closed": closed, "exits": exits}
 
 
 def simulate_path(candles: list, decision_ts: float, b: BouncerConfig, exit_reserve: float | None = None, end_price: float | None = None) -> dict | None:
