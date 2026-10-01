@@ -60,15 +60,15 @@ the pool's remaining liquidity: a pool whose liquidity was pulled pays back ~not
 price says. (An earlier version of this backtest valued pulled pools at their last price, which made
 several "winning" strategies look great. They weren't.)
 
-Backtest snapshot: 3,644 launches on Robinhood Chain over 49 hours (Sept 29 and Oct 1 2026), 2,912
-with a known outcome, free checks only, $100 per pair:
+Backtest snapshot: 3,644 launches on Robinhood Chain over 49 hours (Sept 29 and Oct 1 2026), 2,845
+with a simulated trade, free checks only, $100 per pair:
 
-| book | buys | trades | paper return |
-|---|---|---:|---:|
-| buy everything | every new pair | 2,912 | −35.9% |
-| crowd only | 15+ buyers, top 3 under 45% | 1,048 | −42.9% |
-| skip the rug ring | every pair the rug ring check passes | 1,936 | −18.4% |
-| bouncer | ENTER only | 93 | −15.4% |
+| book | buys | trades | paper return | lost 90%+ |
+|---|---|---:|---:|---:|
+| buy everything | every new pair | 2,845 | −35.9% | 763 |
+| crowd only | 15+ buyers, top 3 under 45% | 1,023 | −42.9% | 382 |
+| skip the rug ring | every pair the rug ring check passes | 1,886 | −18.4% | 91 |
+| bouncer | ENTER only | 92 | −15.4% | 11 |
 
 **What the rug ring catches.** Many rugs here are dead within two minutes, before any bot that waits
 for data can act, so the fair test is the pools still trading when the bot decides (1,767 of them).
