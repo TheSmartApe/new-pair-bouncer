@@ -35,6 +35,10 @@ class BouncerConfig:
     max_cluster_buyer_share: float = 0.50      # fail above: share of buyers that belong to one coordinated group
     warn_cluster_buyer_share: float = 0.25
     cohort_min_wallets: int = 4                # this many distinct wallets buying in the same block = a coordinated cohort
+    # rug ring: wallets that keep showing up early in launches that die
+    ring_window_s: int = 30                    # buyers whose first buy came within this many seconds of the first trade
+    ring_min_launches: int = 2                 # ...with at least this many earlier launches whose outcome is known
+    ring_min_rug_share: float = 0.30           # ...of which at least this share were dead within the hour, fail the pair
     # supply grab: who already holds the token after the first minutes
     max_early_supply_share: float = 0.25       # fail at or above: share of supply still held (bought minus sold) by the wallets that bought in the launch window
     warn_top3_supply_share: float = 0.15       # warn at or above: same, for the 3 biggest of those wallets
@@ -110,6 +114,7 @@ class Memory:
     packs: dict[str, dict] = field(default_factory=dict)       # wallet -> {pack_id, size, shared_launches}
     dev_launches: dict[str, int] = field(default_factory=dict)  # deployer -> launches seen
     dev_rugs: dict[str, int] = field(default_factory=dict)      # deployer -> earlier pools whose liquidity was pulled within an hour
+    wallet_rugs: dict[str, tuple] = field(default_factory=dict)  # wallet -> (earlier launches it bought early, how many of them were dead within the hour)
 
 
 def _pct(x: float) -> str:
@@ -170,6 +175,7 @@ def tape_features(trades: list[dict], cfg: BouncerConfig, developer: str | None 
         if t["wallet"] in buyers:
             net[t["wallet"]] += (t.get("token_amount") or 0) * (1 if t["kind"] == "buy" else -1)
     held = sorted((max(v, 0.0) for v in net.values()), reverse=True)
+    early = sorted({t["wallet"] for t in buys if t["sec_offset"] is not None and t["sec_offset"] <= cfg.ring_window_s})
     dev = (developer or "").lower() or None
     if dev is None:  # no token info yet: the single creation-block buyer stands in for the dev
         dev = fallback_dev(trades, created_ts, creation_block_s)
@@ -189,6 +195,7 @@ def tape_features(trades: list[dict], cfg: BouncerConfig, developer: str | None 
         "dev": dev,
         "dev_sold": bool(dev and any(t["wallet"] == dev for t in sells)),
         "dev_from_token_info": bool(developer),
+        "early_wallets": early,
         "supply": supply,
         "early_supply_share": round(sum(held) / supply, 4) if supply else None,
         "top3_supply_share": round(sum(held[:3]) / supply, 4) if supply else None,
@@ -207,6 +214,20 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
     share = f["roundtrip_volume_share"]
     status = FAIL if share > cfg.max_roundtrip_volume_share else WARN if share > cfg.warn_roundtrip_volume_share else PASS
     out.append(Check("wash_trading", "wash", status, f"{_pct(share)} of the volume came from wallets that bought and sold within {cfg.roundtrip_s}s ({len(f['roundtrippers'])} wallets)", share))
+
+    # rug ring: the strongest check in the backtest. Rugs on this chain come from a recurring ring of
+    # wallets (launch wallets plus the bots that snipe their launches), and their addresses repeat.
+    ring = []
+    for w in f.get("early_wallets", []):
+        n_launches, n_rugs = mem.wallet_rugs.get(w, (0, 0))
+        if n_launches >= cfg.ring_min_launches and n_rugs / n_launches >= cfg.ring_min_rug_share:
+            ring.append((n_rugs, n_launches))
+    if ring:
+        worst = max(ring)
+        out.append(Check("rug_ring", "clusters", FAIL,
+                         f"{len(ring)} of the first-{cfg.ring_window_s}s buyers were early in launches that died: one of them in {worst[0]} of {worst[1]}", len(ring)))
+    else:
+        out.append(Check("rug_ring", "clusters", PASS, "none of the first buyers has a record of early buys in launches that died", 0))
 
     # known bots
     bots = [w for w in buyers if mem.classes.get(w, {}).get("label") in ("round_tripper", "dust_bot")]
@@ -326,13 +347,17 @@ def stage2(profiles: dict[str, dict], cfg: BouncerConfig) -> list[Check]:
 
 
 def usable_reserve(reserve_usd: float | None, recent_trades: int | None, cfg: BouncerConfig) -> float | None:
-    """The pool liquidity to trust, or None when it can't be trusted. CoinGecko reports $0 or ~1e-13
-    of liquidity for some live Uniswap v3/v4 pools while they trade thousands of dollars a minute; a
-    reserve under $1, or under `rug_reserve_usd` on a pool that traded in the last minutes, is treated
-    as unknown rather than empty."""
-    if reserve_usd is None or reserve_usd < 1:
+    """The pool liquidity to trust, or None when it can't be trusted.
+
+    A quiet pool's reported reserve is what is really there: when the liquidity provider pulls, the
+    pool shows ~$0 and no more trades, and selling into it returns ~nothing whatever its last price
+    says. An ACTIVE pool reporting under `rug_reserve_usd` is a CoinGecko misreport (some live Uniswap
+    v3/v4 pools show $0 while trading thousands a minute), so it is treated as unknown."""
+    if reserve_usd is None:
         return None
-    if reserve_usd < cfg.rug_reserve_usd and (recent_trades or 0) > 0:
+    if not recent_trades:
+        return max(reserve_usd, 0.0)
+    if reserve_usd < cfg.rug_reserve_usd:
         return None
     return reserve_usd
 

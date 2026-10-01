@@ -98,6 +98,7 @@ function renderBacktest(s) {
     `Bought blind ~7 min after launch, held up to 1h: <b class="${tone(c.paper_return_pct)}">${signedPct(c.paper_return_pct)}</b> over ${num(c.with_pnl)} trades`,
     `Only the pairs it let in: <b class="${tone(b.paper_return_pct)}">${signedPct(b.paper_return_pct)}</b> over ${num(b.with_pnl)} trades`,
     esc(bt.worst_avoided.replace("launches that lost 90%+ in an hour were not ENTER", "launches whose price was down 90%+ an hour later were turned away")),
+    ...(bt.ring_catch && bt.ring_catch.rugs ? [`Rug ring: flagged <b>${num(bt.ring_catch.rugs_flagged)} of ${num(bt.ring_catch.rugs)}</b> pools still trading at decision time that were dead within the hour (${num(bt.ring_catch.survivors_flagged)} of ${num(bt.ring_catch.survivors)} that survived)`] : []),
     `Top reasons to say no: ${Object.entries(bt.fail_reasons || {}).slice(0, 3).map(([k, v]) => `${k.replace(/_/g, " ")} (${num(v)})`).join(", ")}`,
   ].map((x) => `<li>${x}</li>`).join("");
 }

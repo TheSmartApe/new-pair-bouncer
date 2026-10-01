@@ -366,6 +366,22 @@ class Store:
                 rugs[dep] = rugs.get(dep, 0) + 1
         return launches, rugs
 
+    def wallet_rug_memory(self, rug_reserve_usd: float, before_ts: float | None = None) -> dict[str, tuple]:
+        """wallet -> (launches it bought in their recorded first 2 minutes whose +60m outcome is known,
+        how many of those were dead: under `rug_reserve_usd` of liquidity and no trade in 30 minutes).
+        Only outcomes observed before `before_ts` count."""
+        before_ts = before_ts or time.time()
+        rows = self.db.execute(
+            """WITH wp AS (SELECT DISTINCT chain, pool, wallet FROM trades WHERE kind = 'buy'),
+                    o AS (SELECT chain, pool,
+                                 CASE WHEN trades_m30 = 0 AND COALESCE(reserve_usd, 0) < ? THEN 1 ELSE 0 END AS rug
+                          FROM snapshots WHERE target_age_min = 60 AND trades_m30 IS NOT NULL AND ts < ?)
+               SELECT wp.wallet, COUNT(*) AS n, SUM(o.rug) AS rugs FROM wp JOIN o ON o.chain = wp.chain AND o.pool = wp.pool
+               GROUP BY wp.wallet HAVING COUNT(*) >= 2""",
+            (rug_reserve_usd, before_ts),
+        )
+        return {r[0]: (r[1], r[2]) for r in rows}
+
     def dev_launch_counts(self) -> dict[str, int]:
         return {r[0].lower(): r[1] for r in self.db.execute("SELECT developer, COUNT(*) FROM launch_info WHERE developer IS NOT NULL GROUP BY developer")}
 

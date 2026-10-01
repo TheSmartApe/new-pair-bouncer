@@ -181,7 +181,7 @@ def test_usable_reserve_and_rug_rule():
     from sniper.store import is_rug
 
     assert checks.usable_reserve(0.0, 58, B) is None          # live v4 pool reported at $0: unknown, not empty
-    assert checks.usable_reserve(2.1e-13, 0, B) is None
+    assert checks.usable_reserve(2.1e-13, 0, B) == 2.1e-13      # quiet and empty: the liquidity is really gone
     assert checks.usable_reserve(40.0, 12, B) is None         # tiny but still trading: don't trust it
     assert checks.usable_reserve(40.0, 0, B) == 40.0          # tiny and quiet: really empty
     assert checks.usable_reserve(25_000.0, 30, B) == 25_000.0
@@ -221,3 +221,23 @@ def test_simulate_path_ignores_prices_before_the_decision():
     assert trade["reason"] == "time" and trade["entry_raw"] == 1.0
     candles.append([T0 + 420, 1.0, 1.0, 0.3, 0.3, 10])
     assert bouncer.simulate_path(candles, decision, b, None, 1.0)["reason"] == "stop_loss"
+
+
+def test_rug_ring_fails_on_an_early_buyer_with_a_rug_heavy_past():
+    tape = organic_tape() + [t("ringer", "buy", 4, 3, 30)]
+    f = checks.tape_features(tape, B, created_ts=T0)
+    assert "ringer" in f["early_wallets"]
+    found = by_key(checks.stage0(f, Memory(wallet_rugs={"ringer": (5, 3)}), B, reserve_usd=12_000))
+    assert found["rug_ring"].status == FAIL and "3 of 5" in found["rug_ring"].reason
+    found = by_key(checks.stage0(f, Memory(wallet_rugs={"ringer": (5, 1)}), B, reserve_usd=12_000))  # 20%: under the bar
+    assert found["rug_ring"].status == PASS
+    late = organic_tape() + [t("ringer", "buy", 400, 90, 30)]  # bought 90s in: not an early buyer
+    f = checks.tape_features(late, B, created_ts=T0)
+    assert by_key(checks.stage0(f, Memory(wallet_rugs={"ringer": (5, 5)}), B, reserve_usd=12_000))["rug_ring"].status == PASS
+
+
+def test_pulled_pool_pays_back_almost_nothing():
+    b = BouncerConfig()
+    fill, qty = bouncer.entry_fill(0.01, 100, b, reserve_usd=8_000)
+    gone = checks.usable_reserve(0.0, 0, b)
+    assert gone == 0.0 and bouncer.exit_proceeds(qty, 0.03, b, gone) == 0.0  # the last price says 3x; the pool is empty

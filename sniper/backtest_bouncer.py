@@ -128,8 +128,19 @@ def run(store, cfg: SniperConfig, step_min: int = 15, fetch: bool = False) -> di
                 s = snaps.get((q["chain"], q["pool"]))
                 if s and s["ts"] < step_start and is_rug(s.get("reserve_usd"), s.get("trades_m30"), b.rug_reserve_usd):  # only outcomes already known
                     dev_rugs[dep] += 1
+            wallet_rugs: dict[str, list] = defaultdict(lambda: [0, 0])
+            for q in prior:
+                qk = (q["chain"], q["pool"])
+                s = snaps.get(qk)
+                if not s or s["ts"] >= step_start or s.get("trades_m30") is None:
+                    continue  # outcome not known yet when this step decides
+                rug = is_rug(s.get("reserve_usd"), s.get("trades_m30"), b.rug_reserve_usd)
+                for w in {t["wallet"] for t in raw_by_pool.get(qk, []) if t["kind"] == "buy"}:
+                    wallet_rugs[w][0] += 1
+                    wallet_rugs[w][1] += int(rug)
             memory = Memory(classes={w: {"label": s["label"], "launches": s["launches"]} for w, s in stats.items()}, packs=pack_of,
-                            dev_launches=dict(dev_counts), dev_rugs=dict(dev_rugs))
+                            dev_launches=dict(dev_counts), dev_rugs=dict(dev_rugs),
+                            wallet_rugs={w: tuple(v) for w, v in wallet_rugs.items() if v[0] >= 2})
 
         tape = by_pool.get(key, [])
         developer = (info.get(key) or {}).get("developer")  # like the live bot: token info, else the shared stand-in rule
@@ -138,13 +149,16 @@ def run(store, cfg: SniperConfig, step_min: int = 15, fetch: bool = False) -> di
         found = checks.stage0(f, memory, b, reserve_usd=None)
         v = checks.decide(found, 0, f)
         snap = snaps.get(key)
-        dead = multiple = paper_pnl = exit_reason = None
+        dead = multiple = paper_pnl = exit_reason = rug = live_at_decision = None
         if snap and (snap["ts"] - p["created_ts"]) / 60 - 60 <= 6:
             alive = analyze.is_alive(snap, 60, cfg)
             if alive is not None:
                 dead = not alive
                 decision_ts = max(p["created_ts"] + cfg.window_s, max((t["ts"] for t in tape), default=0)) + cfg.lag_s
                 exit_reserve = checks.usable_reserve(snap.get("reserve_usd"), snap.get("trades_m30"), b)
+                rug = is_rug(snap.get("reserve_usd"), snap.get("trades_m30"), b.rug_reserve_usd)
+                if candles.get(key):
+                    live_at_decision = max(c[0] for c in candles[key]) + 60 > decision_ts  # a minute bar at or after the decision
                 trade = bouncer.simulate_path(candles.get(key, []), decision_ts, b, exit_reserve, snap.get("price_usd")) if key in candles else None
                 if trade:
                     paper_pnl, exit_reason = trade["pnl"], trade["reason"]
@@ -154,8 +168,8 @@ def run(store, cfg: SniperConfig, step_min: int = 15, fetch: bool = False) -> di
         rows.append({
             "pool": p["pool"], "name": p.get("name"), "dex": p.get("dex"), "created_ts": p["created_ts"], "verdict": v.verdict,
             "fails": [c.key for c in v.fails], "warns": [c.key for c in v.warns], "values": values,
-            "trades": f["trades"], "volume_usd": f["volume_usd"], "cohort": len(f["cohort"]), "crowd": checks.crowd_only(f, b),
-            "dead": dead, "multiple": multiple, "paper_pnl": paper_pnl, "exit_reason": exit_reason,
+            "trades": f["trades"], "volume_usd": f["volume_usd"], "cohort": len(f["cohort"]), "crowd": checks.crowd_only(f, b), "ring": any(c.key == "rug_ring" and c.status == checks.FAIL for c in found),
+            "dead": dead, "rug": rug, "live_at_decision": live_at_decision, "multiple": multiple, "paper_pnl": paper_pnl, "exit_reason": exit_reason,
         })
 
     by_verdict = {name: _summary([r for r in rows if r["verdict"] == name], b.position_usd) for name in ("ENTER", "WATCH", "AVOID")}
@@ -165,15 +179,21 @@ def run(store, cfg: SniperConfig, step_min: int = 15, fetch: bool = False) -> di
             fail_counts[k] += 1
     worst = [r for r in rows if r["multiple"] is not None and r["multiple"] <= 0.1]
     good = [r for r in rows if r["multiple"] is not None and r["multiple"] >= 2]
+    live = [r for r in rows if r["live_at_decision"] and r["rug"] is not None]  # still trading when the bot decides
+    live_rugs = [r for r in live if r["rug"]]
+    live_ok = [r for r in live if not r["rug"]]
     return {
         "launches": len(rows),
         "hours": round((launches[-1]["created_ts"] - launches[0]["created_ts"]) / 3600, 2),
         "control": _summary(rows, b.position_usd),
         "crowd": _summary([r for r in rows if r["crowd"]], b.position_usd),
+        "ring_only": _summary([r for r in rows if not r["ring"]], b.position_usd),
         "bouncer": _summary([r for r in rows if r["verdict"] == "ENTER"], b.position_usd),
         "by_verdict": by_verdict,
         "fail_reasons": dict(sorted(fail_counts.items(), key=lambda kv: -kv[1])),
         "worst_avoided": f"{sum(1 for r in worst if r['verdict'] != 'ENTER')} of {len(worst)} launches that lost 90%+ in an hour were not ENTER",
+        "ring_catch": {"rugs": len(live_rugs), "rugs_flagged": sum(r["ring"] for r in live_rugs),
+                       "survivors": len(live_ok), "survivors_flagged": sum(r["ring"] for r in live_ok)},
         "good_rejected": f"{sum(1 for r in good if r['verdict'] != 'ENTER')} of {len(good)} launches that doubled in an hour were not ENTER",
         "rows": rows,
     }
@@ -183,7 +203,7 @@ def fmt(res: dict) -> str:
     if not res.get("launches"):
         return "no recorded launches yet"
     lines = [f"{res['launches']} launches over {res['hours']}h, walk-forward, stage 0 checks, entry at decision time, simulated TP/SL/time exits"]
-    for name in ("control", "crowd", "bouncer"):
+    for name in ("control", "crowd", "ring_only", "bouncer"):
         s = res[name]
         lines.append(f"{name:8} {s['launches']:5} launches | {s['with_outcome']} with outcome | dead {s['dead_pct']}% | median x{s['median_multiple']} | "
                      f"-90%: {s['down_90_pct']}% | 2x+: {s['up_2x_pct']}% | paper ${s['paper_pnl_usd']} ({s['paper_return_pct']}%)")
@@ -191,5 +211,8 @@ def fmt(res: dict) -> str:
         lines.append(f"  {name:6} {s['launches']:5} | dead {s['dead_pct']}% | median x{s['median_multiple']} | -90%: {s['down_90_pct']}% | paper {s['paper_return_pct']}%")
     lines.append(f"fail reasons: {res['fail_reasons']}")
     lines.append(res["worst_avoided"])
+    rc = res["ring_catch"]
+    lines.append(f"rug ring, pools still trading at decision: flagged {rc['rugs_flagged']} of {rc['rugs']} that were dead within the hour, "
+                 f"{rc['survivors_flagged']} of {rc['survivors']} that survived")
     lines.append(res["good_rejected"])
     return "\n".join(lines)

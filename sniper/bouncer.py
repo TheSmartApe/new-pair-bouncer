@@ -83,7 +83,8 @@ class Bouncer:
     def refresh_memory(self, force: bool = False):
         if force or time.time() - self._memory_ts > MEMORY_TTL_S:
             launches, rugs = self.store.deployer_history(self.b.rug_reserve_usd, creation_block_s=self.cfg.creation_block_s)
-            self.memory = Memory(classes=self.store.load_classes(), packs=self.store.load_packs(), dev_launches=launches, dev_rugs=rugs)
+            self.memory = Memory(classes=self.store.load_classes(), packs=self.store.load_packs(), dev_launches=launches, dev_rugs=rugs,
+                                 wallet_rugs=self.store.wallet_rug_memory(self.b.rug_reserve_usd))
             self._memory_ts = time.time()
 
     async def _token_info(self, client: CoinGeckoClient, chain: str, token: str | None) -> dict | None:
@@ -189,7 +190,7 @@ class Bouncer:
             if a.get("address") and p:
                 snap = analyze.pool_snapshot(row)
                 prices[a["address"]] = p
-                reserves[a["address"]] = checks.usable_reserve(snap["reserve_usd"], snap["trades_m5"], self.b)
+                reserves[a["address"]] = checks.usable_reserve(snap["reserve_usd"], snap["trades_m30"], self.b)
         now = time.time()
         closed = 0
         for r in open_rows:

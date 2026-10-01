@@ -15,6 +15,10 @@ chart: a thin crowd of a few wallets, early buyers sitting on a big chunk of the
 wallet whose last pools had their liquidity pulled, buyers who are the same bots that hit every
 launch.
 
+The strongest signal turned out to be the simplest: **the same wallets keep showing up early in launches
+that die.** Rugs on this chain come from a recurring ring of launch wallets and the bots that buy into
+their launches. Their addresses repeat, so the bot remembers them.
+
 The Bouncer looks. For each new pair it reads the launch, profiles the wallets behind it with
 CoinGecko API data, and returns **ENTER**, **WATCH** or **AVOID** with the reason. Three paper books
 then trade the verdicts so you can see what the checks are worth.
@@ -27,6 +31,7 @@ Cheapest first. A pair that fails a free check never costs an API call.
 
 | check | fails when | data |
 |---|---|---|
+| **rug ring** | a wallet that bought in the first 30 seconds was early in 2+ earlier launches, and 30%+ of those were dead within the hour | the bot's memory of past launches + pool trades |
 | **dev sold** | the token's developer (or the creation-block buyer) already sold in the launch window | pool trades with wallets |
 | **supply grab** | the wallets that bought in the launch window still hold 25%+ of the supply (warns at 15%+ for the top 3) | pool trades + token supply |
 | **deployer rug history** | this deployer's earlier pools had their liquidity gone within an hour | the bot's memory of past launches |
@@ -48,39 +53,34 @@ together, and which deployers pulled liquidity before.
 ## What the backtest says
 
 `python -m sniper backtest-bouncer` replays every recorded launch the way the live bot would have
-seen it. The memory only uses launches created before each one, the entry is the price at decision
-time, and exits are simulated on minute candles with the same take-profit (+100%), stop-loss (−50%)
-and one-hour limit as the live books. Selling goes through the pool's remaining liquidity, so a pair
-that still shows its old price but has $50 left in the pool pays back what $50 of liquidity can.
+seen it. The memory only uses launches created before each one (and outcomes already known at the
+time), the entry is the price at decision time, and exits are simulated on minute candles with the
+same take-profit (+100%), stop-loss (−50%) and one-hour limit as the live books. Selling goes through
+the pool's remaining liquidity: a pool whose liquidity was pulled pays back ~nothing, whatever its last
+price says. (An earlier version of this backtest valued pulled pools at their last price, which made
+several "winning" strategies look great. They weren't.)
 
-Backtest snapshot, 630 simulated trades (Robinhood Chain, mostly Sept 29 2026, free checks only),
-$100 per pair:
+Backtest snapshot: 3,644 launches on Robinhood Chain over 49 hours (Sept 29 and Oct 1 2026), 2,912
+with a known outcome, free checks only, $100 per pair:
 
 | book | buys | trades | paper return |
 |---|---|---:|---:|
-| buy everything | every new pair | 630 | −21.5% |
-| crowd only | 15+ buyers, top 3 under 45% | 231 | −15.2% |
-| bouncer | ENTER only | 57 | +2.3% |
+| buy everything | every new pair | 2,912 | −35.9% |
+| crowd only | 15+ buyers, top 3 under 45% | 1,048 | −42.9% |
+| skip the rug ring | every pair the rug ring check passes | 1,936 | −18.4% |
+| bouncer | ENTER only | 93 | −15.4% |
 
-Split in two halves by time: +2.8% vs −21.0% in the first half, +1.8% vs −22.0% in the second. Of the
-21 launches whose price was down 90%+ an hour later, the bouncer let in none. It also turned away 14
-of the 19 that doubled.
+**What the rug ring catches.** Many rugs here are dead within two minutes, before any bot that waits
+for data can act, so the fair test is the pools still trading when the bot decides (1,767 of them).
+293 of those were dead within the hour; the rug ring had flagged 255 (87%). Of the 1,474 that
+survived, it flagged 211 (14%). A flagged pair died within the hour 55% of the time, an unflagged one
+3%. In paper terms: buying all 1,767 lost 24.7% a trade, the flagged ones lost 48.3% (half of them
+lost 90%+), the unflagged ones 16.2%.
 
-Live paper trading tells a different story so far (Oct 1 2026, 4.5 hours, same exits):
-
-| book | trades closed | average per trade | lost 90%+ |
-|---|---:|---:|---:|
-| buy everything | 1,304 | −10.8% | 51 |
-| crowd only | 462 | −2.8% | 5 |
-| bouncer | 40 | −11.2% | 0 |
-
-The bouncer kept out every trade that lost 90%+, but on average it did no better than buying
-everything: the pairs it lets in mostly drift lower and go quiet, and price impact plus fees cost
-about 7% on a $100 order. The backtest's thresholds were tuned on part of its own data; the live
-books are the real test.
-
-Read it as a risk filter, not a money printer. Re-run the backtest on your own data before you trust
-any number here.
+**What it doesn't do: make money.** Every book loses. Skipping the ring halves the damage; nothing
+here found an entry that wins after price impact and fees. Read it as a filter that keeps you out of
+the worst launches, not as a strategy. Re-run the backtest on your own data before you trust any
+number here.
 
 ## How fast it is
 
@@ -192,8 +192,8 @@ judgments about anyone behind a wallet.
   buy and a sell in the same transaction, only the larger side is kept.
 - **Trades are attributed to the transaction sender.** ERC-4337 bundlers (addresses starting with
   `0x4337`) submit other users' trades and are set aside.
-- **What the checks can and can't see.** The worst launches were caught by a thin crowd, by launch
-  wallets whose earlier pools died, and by supply held by the first buyers. A dev who already sold
+- **What the checks can and can't see.** The worst launches were caught by the rug ring, by a thin
+  crowd, by launch wallets whose earlier pools died, and by supply held by the first buyers. A dev who already sold
   was not a useful predictor on its own: those pairs blew up less often. Wash trading and
   wallet clusters were not good rug predictors on their own: they mark launches whose volume isn't
   real demand and that go quiet within the hour, which still matters if you need to sell.

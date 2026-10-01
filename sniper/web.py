@@ -192,8 +192,9 @@ class State:
             """SELECT v.decided_ts, v.checks_json, p.name FROM verdicts v JOIN pools p ON p.chain=v.chain AND p.pool=v.pool
                WHERE v.verdict='AVOID' ORDER BY v.decided_ts DESC LIMIT 200"""
         ):
-            for c in json.loads(r["checks_json"]).get("checks", []):
-                if c["key"] in ("entity_cluster", "known_bots") and c["status"] == "fail":
+            found = json.loads(r["checks_json"]).get("checks", [])
+            for c in sorted(found, key=lambda c: c["key"] != "rug_ring"):  # the rug ring reason first when there are several
+                if c["key"] in ("rug_ring", "entity_cluster", "known_bots") and c["status"] == "fail":
                     clusters.append({"ts": r["decided_ts"], "name": r["name"], "reason": c["reason"]})
                     break
             if len(clusters) >= 8:
