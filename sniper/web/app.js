@@ -47,7 +47,7 @@ function renderKpis(s) {
   const bt = s.backtest || {};
   if (bt.bouncer && bt.control) {
     $("k-bt").innerHTML = `<span class="${tone(bt.bouncer.paper_return_pct)}">${signedPct(bt.bouncer.paper_return_pct)}</span> <span class="vs">vs</span> <span class="${tone(bt.control.paper_return_pct)}">${signedPct(bt.control.paper_return_pct)}</span>`;
-    $("k-bt-sub").textContent = `${num(bt.bouncer.with_outcome)} pairs let in vs ${num(bt.control.with_outcome)} bought blind`;
+    $("k-bt-sub").textContent = `${num(bt.bouncer.with_pnl)} trades let in vs ${num(bt.control.with_pnl)} bought blind`;
   }
 }
 
@@ -95,9 +95,9 @@ function renderBacktest(s) {
   }
   const b = bt.bouncer, c = bt.control;
   $("bt").innerHTML = [
-    `Bought blind ~5 min after launch, held up to 1h: <b class="${tone(c.paper_return_pct)}">${signedPct(c.paper_return_pct)}</b> over ${num(c.with_outcome)} pairs`,
-    `Only the pairs it let in: <b class="${tone(b.paper_return_pct)}">${signedPct(b.paper_return_pct)}</b> over ${num(b.with_outcome)} pairs`,
-    esc(bt.worst_avoided.replace(" were not ENTER", " were turned away")),
+    `Bought blind ~7 min after launch, held up to 1h: <b class="${tone(c.paper_return_pct)}">${signedPct(c.paper_return_pct)}</b> over ${num(c.with_pnl)} trades`,
+    `Only the pairs it let in: <b class="${tone(b.paper_return_pct)}">${signedPct(b.paper_return_pct)}</b> over ${num(b.with_pnl)} trades`,
+    esc(bt.worst_avoided.replace("launches that lost 90%+ in an hour were not ENTER", "launches whose price was down 90%+ an hour later were turned away")),
     `Top reasons to say no: ${Object.entries(bt.fail_reasons || {}).slice(0, 3).map(([k, v]) => `${k.replace(/_/g, " ")} (${num(v)})`).join(", ")}`,
   ].map((x) => `<li>${x}</li>`).join("");
 }

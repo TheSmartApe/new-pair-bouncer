@@ -91,7 +91,7 @@ def test_same_tx_opposite_legs_collapse_to_the_dominant_side():
     rows = [
         _row("0xhook", "buy", 1000, T0 + 1, usd=264.08, tx="0xa"), _row("0xhook", "sell", 1000, T0 + 1, usd=3.24, tx="0xa"),   # hook fee leg on a buy
         _row("0xseller", "sell", 1001, T0 + 2, usd=247.83, tx="0xb"), _row("0xseller", "buy", 1001, T0 + 2, usd=0.59, tx="0xb"),  # fee leg on a sell
-        _row("0xrelay", "buy", 1002, T0 + 3, usd=100, tx="0xc"), _row("0xrelay", "sell", 1002, T0 + 3, usd=98, tx="0xc"),       # pons relayed third-party sell
+        _row("0xrelay", "buy", 1002, T0 + 3, usd=100, tx="0xc"), _row("0xrelay", "sell", 1002, T0 + 3, usd=98, tx="0xc"),       # launchpad router relaying a third-party sell
         _row("0xtwo", "buy", 1003, T0 + 4, usd=50, tx="0xd"), _row("0xtwo", "sell", 1010, T0 + 9, usd=40, tx="0xe"),            # a real round trip: 2 txs
     ]
     L.add("p", T0, rows)
@@ -269,10 +269,10 @@ def test_daily_windows_cover_every_launch():
 def test_parse_pool_strips_network_prefix():
     row = {
         "attributes": {"address": "0xpool", "name": "X / WETH", "pool_created_at": "2026-09-29T17:25:42Z"},
-        "relationships": {"base_token": {"data": {"id": "robinhood_0xtok"}}, "quote_token": {"data": {"id": "robinhood_0xweth"}}, "dex": {"data": {"id": "pons-v2"}}},
+        "relationships": {"base_token": {"data": {"id": "robinhood_0xtok"}}, "quote_token": {"data": {"id": "robinhood_0xweth"}}, "dex": {"data": {"id": "some-dex-v2"}}},
     }
     p = analyze.parse_pool(row)
-    assert p["token"] == "0xtok" and p["quote"] == "0xweth" and p["dex"] == "pons-v2" and p["created_ts"] > 0
+    assert p["token"] == "0xtok" and p["quote"] == "0xweth" and p["dex"] == "some-dex-v2" and p["created_ts"] > 0
 
 
 def test_class_cache_roundtrip(tmp_path):

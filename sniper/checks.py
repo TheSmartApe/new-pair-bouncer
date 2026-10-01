@@ -236,7 +236,8 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
 
     # dev
     if f["dev"] and f["dev_sold"] and cfg.fail_if_dev_sold:
-        out.append(Check("dev_sold", "dev", FAIL, f"the dev ({_short(f['dev'])}) already sold in the first minutes", True))
+        who = "the dev" if f.get("dev_from_token_info") else "the creation-block buyer (usually the dev)"
+        out.append(Check("dev_sold", "dev", FAIL, f"{who} already sold in the first minutes", True))
     elif f["dev"]:
         out.append(Check("dev_sold", "dev", PASS, "the dev has not sold", False))
     else:
@@ -244,7 +245,7 @@ def stage0(f: dict, mem: Memory, cfg: BouncerConfig, reserve_usd: float | None =
     rugs = mem.dev_rugs.get(f["dev"] or "", 0)
     if f["dev"]:
         status = FAIL if rugs > cfg.max_deployer_rugs else PASS
-        out.append(Check("deployer_rugs", "dev", status, f"this deployer's liquidity was gone within an hour on {rugs} earlier pools" if rugs else "no pulled liquidity in this deployer's earlier pools", rugs))
+        out.append(Check("deployer_rugs", "dev", status, f"this launch wallet's liquidity was gone within an hour on {rugs} earlier pools" if rugs else "no pulled liquidity in this launch wallet's earlier pools", rugs))
     launches = mem.dev_launches.get(f["dev"] or "", 0)
     status = WARN if launches > cfg.warn_dev_launches else PASS
     out.append(Check("serial_launcher", "dev", status, f"this deployer launched {launches} other tokens the bot has seen" if launches else "first launch the bot has seen from this deployer", launches))

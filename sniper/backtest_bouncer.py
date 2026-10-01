@@ -65,6 +65,7 @@ def _summary(rows: list[dict], position_usd: float = 100) -> dict:
     return {
         "launches": len(rows),
         "with_outcome": len(with_outcome),
+        "with_pnl": len(pnl),
         "dead_pct": round(100 * sum(1 for r in with_outcome if r["dead"]) / len(with_outcome), 1) if with_outcome else None,
         "median_multiple": round(statistics.median(mults), 3) if mults else None,
         "down_50_pct": round(100 * sum(1 for m in mults if m <= 0.5) / len(mults), 1) if mults else None,

@@ -139,7 +139,7 @@ def drop_fee_legs(trades: list[dict], cfg: SniperConfig) -> list[dict]:
     """Collapses a sender's opposite-side rows inside ONE transaction to the dominant side.
 
     Two protocol patterns produce them. Uniswap v4 hook pools (e.g. Bankr) emit a small swap in the
-    other direction next to every trade (a $264 buy with a $3 "sell"). Pons-v2 router calls can sell
+    other direction next to every trade (a $264 buy with a $3 "sell"). Some launchpad router calls can sell
     tokens pulled from a third-party address and hand the proceeds to the sender, who then shows both
     a buy and a sell. Neither is the sender buying and selling. Left in, every such trade looks like a
     0-second round trip, and a pure seller looks like a sniper. The side with the larger USD value is

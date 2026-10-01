@@ -8,11 +8,12 @@
 A bot that checks every new pair on Robinhood Chain before it buys, and turns most of them away.
 
 Robinhood Chain gets hundreds of new pools an hour. Buying them blind is a losing game: in our
-backtest, putting $100 into every new pair five minutes after launch and holding for up to an hour
-lost about a quarter of the money. Most of the damage comes from things you can see in the first
-two minutes if you look at *who* is trading, not just at the chart: a dev who already sold, a few
-wallets sitting on a big chunk of the supply, a deployer whose last pools had their liquidity pulled,
-buyers who are the same bots that hit every launch.
+backtest, putting $100 into every new pair a few minutes after launch and holding for up to an hour
+lost about a fifth of the money (−21.5% a trade), and live paper trading lost 10.8% a trade. A lot of
+what goes wrong is visible in the first two minutes if you look at *who* is trading, not just at the
+chart: a thin crowd of a few wallets, early buyers sitting on a big chunk of the supply, a launch
+wallet whose last pools had their liquidity pulled, buyers who are the same bots that hit every
+launch.
 
 The Bouncer looks. For each new pair it reads the launch, profiles the wallets behind it with
 CoinGecko API data, and returns **ENTER**, **WATCH** or **AVOID** with the reason. Three paper books
@@ -52,27 +53,41 @@ time, and exits are simulated on minute candles with the same take-profit (+100%
 and one-hour limit as the live books. Selling goes through the pool's remaining liquidity, so a pair
 that still shows its old price but has $50 left in the pool pays back what $50 of liquidity can.
 
-Snapshot from 660 Robinhood Chain launches (Sept 29 and Oct 1 2026), $100 per pair:
+Backtest snapshot, 630 simulated trades (Robinhood Chain, mostly Sept 29 2026, free checks only),
+$100 per pair:
 
-| book | buys | pairs with an outcome | paper return | lost 90%+ |
-|---|---|---:|---:|---:|
-| buy everything | every new pair | 660 | −21.5% | 21 |
-| crowd only | 15+ buyers, top 3 under 45% | 239 | −15.2% | 5 |
-| **bouncer** | ENTER only | 58 | **+2.3%** | **0** |
+| book | buys | trades | paper return |
+|---|---|---:|---:|
+| buy everything | every new pair | 630 | −21.5% |
+| crowd only | 15+ buyers, top 3 under 45% | 231 | −15.2% |
+| bouncer | ENTER only | 57 | +2.3% |
 
-Split in two halves by time, the result held: +2.8% vs −21.0% in the first half, +1.8% vs −22.0% in
-the second. It turned away all 21 launches that lost 90%+ within the hour.
+Split in two halves by time: +2.8% vs −21.0% in the first half, +1.8% vs −22.0% in the second. Of the
+21 launches whose price was down 90%+ an hour later, the bouncer let in none. It also turned away 14
+of the 19 that doubled.
 
-Read it as a risk filter, not a money printer: two sessions of launches, 58 pairs let in, thresholds
-picked on part of the same data. The live paper books (below) are the real test. Re-run the backtest on your
-own data before you trust any number here.
+Live paper trading tells a different story so far (Oct 1 2026, 4.5 hours, same exits):
+
+| book | trades closed | average per trade | lost 90%+ |
+|---|---:|---:|---:|
+| buy everything | 1,304 | −10.8% | 51 |
+| crowd only | 462 | −2.8% | 5 |
+| bouncer | 40 | −11.2% | 0 |
+
+The bouncer kept out every trade that lost 90%+, but on average it did no better than buying
+everything: the pairs it lets in mostly drift lower and go quiet, and price impact plus fees cost
+about 7% on a $100 order. The backtest's thresholds were tuned on part of its own data; the live
+books are the real test.
+
+Read it as a risk filter, not a money printer. Re-run the backtest on your own data before you trust
+any number here.
 
 ## How fast it is
 
 Not sniping fast, and it doesn't try to be. On Robinhood Chain, CoinGecko's onchain data lands about
 1 to 3 minutes after the block (measured Oct 1 2026: WebSocket trade messages a median 161s behind
 the chain; REST the same within a few seconds). The bot records two minutes of trading, waits for
-it to be indexed, and decides about five minutes after launch. The API work for a full check (trades
+it to be indexed, and decides about six to seven minutes after launch. The API work for a full check (trades
 with wallets, token info, a handful of wallet profiles) takes about two seconds.
 
 Other chains are faster on the same API: in a short test, Solana trades arrived about 5 seconds behind
@@ -173,12 +188,13 @@ judgments about anyone behind a wallet.
   (fee tiers, post-graduation pools) are skipped. Pools whose trading opens minutes after creation
   are re-anchored on their first trade.
 - **Same-transaction legs.** Hook pools (e.g. Bankr) report a small opposite-side swap next to every
-  trade, and some pons-v2 router calls show the sender both buying and selling. When one sender has a
+  trade, and some launchpad router calls show the sender both buying and selling. When one sender has a
   buy and a sell in the same transaction, only the larger side is kept.
 - **Trades are attributed to the transaction sender.** ERC-4337 bundlers (addresses starting with
   `0x4337`) submit other users' trades and are set aside.
-- **What the checks can and can't see.** In the backtest, supply concentration, a dev who already
-  sold and deployer history were the checks that kept the worst launches out. Wash trading and
+- **What the checks can and can't see.** The worst launches were caught by a thin crowd, by launch
+  wallets whose earlier pools died, and by supply held by the first buyers. A dev who already sold
+  was not a useful predictor on its own: those pairs blew up less often. Wash trading and
   wallet clusters were not good rug predictors on their own: they mark launches whose volume isn't
   real demand and that go quiet within the hour, which still matters if you need to sell.
 - **Young tokens have thin safety data.** Minutes after launch, GT Score is usually low, honeypot
