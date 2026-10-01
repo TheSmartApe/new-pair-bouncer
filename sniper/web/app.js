@@ -95,7 +95,7 @@ function renderBacktest(s) {
   }
   const b = bt.bouncer, c = bt.control;
   $("bt").innerHTML = [
-    `Bought blind at minute ~2, held 1h: <b class="${tone(c.paper_return_pct)}">${signedPct(c.paper_return_pct)}</b> over ${num(c.with_outcome)} pairs`,
+    `Bought blind ~5 min after launch, held up to 1h: <b class="${tone(c.paper_return_pct)}">${signedPct(c.paper_return_pct)}</b> over ${num(c.with_outcome)} pairs`,
     `Only the pairs it let in: <b class="${tone(b.paper_return_pct)}">${signedPct(b.paper_return_pct)}</b> over ${num(b.with_outcome)} pairs`,
     esc(bt.worst_avoided.replace(" were not ENTER", " were turned away")),
     `Top reasons to say no: ${Object.entries(bt.fail_reasons || {}).slice(0, 3).map(([k, v]) => `${k.replace(/_/g, " ")} (${num(v)})`).join(", ")}`,
