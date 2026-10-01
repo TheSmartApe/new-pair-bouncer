@@ -18,11 +18,11 @@ RED, RED_F = "#e03131", "#ffe3e3"
 GREEN, GREEN_F = "#2f9e44", "#ebfbee"
 GREY, GREY_F = "#495057", "#f1f3f5"
 
-fig, ax = plt.subplots(figsize=(17.0, 8.4), dpi=170)
+fig, ax = plt.subplots(figsize=(17.0, 9.6), dpi=170)
 fig.patch.set_facecolor("#ffffff")
 ax.set_facecolor("#ffffff")
-ax.set_xlim(-6, 188)
-ax.set_ylim(-9, 87)
+ax.set_xlim(-6, 190)
+ax.set_ylim(10, 98)
 ax.set_aspect("equal")
 ax.axis("off")
 
@@ -35,36 +35,50 @@ def arrow(p0, p1, color=INK, lw=2.8, scale=24):
     ax.add_patch(FancyArrowPatch(p0, p1, arrowstyle="-|>", mutation_scale=scale, linewidth=lw, color=color, shrinkA=0, shrinkB=0, zorder=4))
 
 
-def node(x0, y0, x1, y1, edge, fill, title, sub, mono=None):
+def node(x0, y0, x1, y1, edge, fill, title, sub, mono=None, title_size=15):
     box(x0, y0, x1, y1, edge, fill)
     cx, top = (x0 + x1) / 2, y1
-    ax.text(cx, top - 4.2, title, ha="center", va="center", fontsize=15, fontweight="bold", color=edge, zorder=5)
-    ax.text(cx, top - 10.2, sub, ha="center", va="center", fontsize=10.8, color=GREY, linespacing=1.45, zorder=5)
+    ax.text(cx, top - 4.2, title, ha="center", va="center", fontsize=title_size, fontweight="bold", color=edge, zorder=5)
+    ax.text(cx, top - 10.6, sub, ha="center", va="center", fontsize=10.6, color=GREY, linespacing=1.45, zorder=5)
     if mono:
-        ax.text(cx, y0 + 1.6, mono, ha="center", va="center", fontsize=9.5, color=GREY, family="monospace", zorder=5)
+        ax.text(cx, y0 + 1.6, mono, ha="center", va="center", fontsize=9.3, color=GREY, family="monospace", zorder=5)
 
 
 # data in
-node(0, 34, 38, 54, INK, GREY_F, "new pools", "every launch on\nRobinhood Chain, every 2 min", "new_pools")
-node(50, 34, 90, 54, INK, GREY_F, "launch tape", "every trade in the first 120s,\nblock + second of each buy", "pools/{pool}/trades/range")
-arrow((39.5, 44), (48.5, 44))
+node(0, 52, 36, 74, INK, GREY_F, "new pair", "every new pool on\nRobinhood Chain", "new_pools")
+node(48, 52, 86, 74, INK, GREY_F, "launch tape", "every trade of the first\n2 minutes, with wallets", "trades/range · tokens/multi")
+arrow((37.5, 63), (46.5, 63))
 
-# classes (code-derived)
-node(104, 60, 142, 78, INK, GREY_F, "serial sniper", "buys in the first 10s of\n3+ launches, holds")
-node(104, 34, 142, 52, RED, RED_F, "round-tripper", "buys in 10s, dumps within 30s\nat a loss, launch after launch")
-node(104, 8, 142, 26, INK, "#ffffff", "serial launcher", "buys in the launch block\nitself (usually the dev)")
-arrow((91.5, 47), (102.5, 67))
-arrow((91.5, 44), (102.5, 43), color=RED)
-arrow((91.5, 41), (102.5, 19))
-ax.text(123, 0.5, "packs = serial wallets that hit the same launches in the same block", ha="center", va="center", fontsize=10.8, color=RED, zorder=5)
+# memory
+node(48, 18, 86, 38, INK, "#ffffff", "memory", "known bots, wallet clusters,\ndeployers who pulled liquidity\nbefore, learned from past launches")
+arrow((67, 50.5), (67, 40), color=GREY)
+ax.text(70, 45, "every launch\nteaches it", ha="left", va="center", fontsize=10, color=GREY, linespacing=1.4, zorder=5)
+
+# the checks
+node(100, 40, 140, 86, RED, RED_F, "the bouncer", "", title_size=16)
+checks = [
+    "dev already sold?",
+    "early buyers hold 25%+",
+    "of the supply?",
+    "deployer rugged before?",
+    "known bots / one cluster",
+    "doing the buying?",
+    "a real crowd of buyers?",
+]
+for i, line in enumerate(checks):
+    ax.text(120, 77 - i * 4.6, line, ha="center", va="center", fontsize=10.4, color=INK, zorder=5)
+ax.text(120, 42.5, "token info · wallet PnL", ha="center", va="center", fontsize=9.3, color=GREY, family="monospace", zorder=5)
+arrow((87.5, 63), (98.5, 63), color=RED)
+arrow((87.5, 28), (101, 38.5), color=GREY)
 
 # outputs
-node(154, 60, 184, 78, GREEN, GREEN_F, "live alert", "a known sniper just\nentered a new launch")
-node(154, 34, 184, 52, GREEN, GREEN_F, "outcomes", "+1h · +6h · +24h:\nalive? price vs snipers?", "pools/multi")
-node(154, 8, 184, 26, GREEN, GREEN_F, "hourly report", "leaderboards, packs,\nthe devs they serve", "tokens/{t}/info")
-arrow((143.5, 69), (152.5, 69), color=GREEN)
-arrow((143.5, 43), (152.5, 43), color=GREEN)
-arrow((143.5, 17), (152.5, 17), color=GREEN)
+node(152, 70, 186, 90, GREEN, GREEN_F, "ENTER", "passed every check:\nthe paper bot buys")
+node(152, 44, 186, 64, RED, RED_F, "AVOID", "with the reason,\non the dashboard")
+node(152, 18, 186, 38, GREEN, "#ffffff", "3 paper books", "bouncer vs crowd only\nvs buy everything,\nsame exits")
+arrow((141.5, 72), (150.5, 80), color=GREEN)
+arrow((141.5, 58), (150.5, 54), color=RED)
+arrow((141.5, 46), (150.5, 32), color=GREY)
+
 
 out = Path(__file__).resolve().parent / "architecture.png"
 fig.savefig(out, facecolor="#ffffff", bbox_inches="tight", pad_inches=0.25)

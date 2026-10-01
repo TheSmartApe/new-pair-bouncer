@@ -1,18 +1,39 @@
-# Agent notes for Serial Sniper Tracker
+# Agent notes for the New Pair Bouncer
 
 This repo has two parts:
 
-- `sniper/`: the Serial Sniper Tracker (the main project, see README.md and the section below).
+- `sniper/`: the New Pair Bouncer and the launch recorder it runs on (the main project, see README.md
+  and the sections below).
 - `bot/` + `core/` + `strategies/`: CoinGecko's onchain-signal-bot starter it was forked from,
   unchanged. `sniper/` reuses `core/client.py`, `core/wallets.py` and `core/links.py`.
 
-## Serial Sniper Tracker
+## New Pair Bouncer
+
+```
+sniper/checks.py           pure pre-entry checks + BouncerConfig thresholds -> ENTER / WATCH / AVOID
+sniper/bouncer.py          live evaluation (called from collect.capture_ready), paper fills with
+                           constant-product impact, three paper books (bouncer / crowd / control),
+                           simulate_path for the backtest
+sniper/backtest_bouncer.py walk-forward replay: memory from earlier launches only, entry at decision
+                           time from cached minute candles, simulated TP/SL/time exits
+tests/test_bouncer.py      offline tests
+```
+
+- Checks run cheapest first: stage 0 (launch tape, token supply, memory) is free; stage 1 (token info)
+  and stage 2 (wallet PnL of the biggest early buyers) only run for pairs still in.
+- Any check that uses history (known bots, clusters, deployer rugs) must use only launches created,
+  and outcomes observed, before the pair being scored. backtest_bouncer enforces this; keep it so.
+- Changing a default threshold: re-run `python -m sniper backtest-bouncer`, compare the first and
+  second half of the launches, and update the README snapshot only with numbers you measured.
+- Every return figure is paper. Never add live order execution to this repo.
+
+## Launch recorder
 
 ```
 sniper/config.py    every tunable, loaded from sniper.yaml
 sniper/store.py     SQLite (WAL): pools, trades, snapshots, wallets, launch_info, alerts, wallet_classes, meta (credits/day)
 sniper/analyze.py   pure, offline: launch tapes, wallet classes, packs, outcomes (all code-derived labels)
-sniper/collect.py   the 24/7 loop: discover -> capture launch tapes -> snapshots -> alerts -> hourly housekeeping
+sniper/collect.py   the 24/7 loop: discover -> capture launch tapes -> bouncer verdicts + paper books -> snapshots -> alerts -> hourly housekeeping
 sniper/profile.py   wallet PnL + trade-history profiles, token info enrichment
 sniper/report.py    reports/serial-snipers.md
 sniper/money.py     cash in vs cash out per serial wallet (CoinGecko wallet PnL, paged; FIFO fallback)

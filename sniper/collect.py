@@ -41,6 +41,49 @@ async def pools_multi(client: CoinGeckoClient, chain: str, addresses: list[str])
     return out
 
 
+async def token_supplies(client: CoinGeckoClient, chain: str, tokens: list[str], batch: int = 20) -> dict[str, float]:
+    """token -> normalized total supply via tokens/multi. A batch that times out is split in smaller
+    ones; a single token that still fails is left out (asked again next time)."""
+    out: dict[str, float] = {}
+
+    async def fetch(group: list[str]):
+        try:
+            d = await client.get(f"/onchain/networks/{chain}/tokens/multi/{','.join(group)}")
+        except CreditBudgetExceeded:
+            raise
+        except CoinGeckoError:
+            if len(group) == 1:
+                return
+            half = len(group) // 2
+            await fetch(group[:half])
+            await fetch(group[half:])
+            return
+        for row in d.get("data", []):
+            a = row.get("attributes") or {}
+            s = analyze._f(a.get("normalized_total_supply"))
+            if a.get("address") and s:
+                out[a["address"].lower()] = s
+
+    for i in range(0, len(tokens), batch):
+        await fetch(tokens[i : i + batch])
+    return out
+
+
+async def backfill_supply(client: CoinGeckoClient, store: Store, limit: int = 3000) -> int:
+    """Total supply for captured launches that don't have it yet (used by the backtest)."""
+    by_chain: dict[str, list[str]] = {}
+    for chain, token in store.tokens_missing_supply(limit):
+        by_chain.setdefault(chain, []).append(token)
+    n = 0
+    for chain, tokens in by_chain.items():
+        got = await token_supplies(client, chain, tokens)
+        for token in tokens:
+            store.save_supply(chain, token, got.get(token))  # None marks "asked, unknown" so it isn't re-asked forever
+            n += int(token in got)
+    store.commit()
+    return n
+
+
 async def discover(client: CoinGeckoClient, store: Store, chain: str, cfg: SniperConfig, deep: bool = False) -> dict:
     """Pages new_pools (newest first). A normal sweep stops at the first page with nothing new. A deep
     sweep keeps going until pools are older than `deep_discovery_min`, because pools can be indexed
@@ -133,6 +176,8 @@ async def capture_tape(client: CoinGeckoClient, chain: str, p, cfg: SniperConfig
     first_minute = int(min(c[0] for c in candles))
     if first_minute + 60 < created:
         return tape
+    if first_minute + 60 + cfg.window_s + cfg.lag_s > time.time():
+        return {**tape, "not_ready": True}
     rows, complete_until = await trades_window(client, chain, p["pool"], first_minute - 15, first_minute + 60 + cfg.window_s, pages)
     late = _tape(rows, complete_until, created, cfg, anchor="first_trade")
     if late["trades"]:
@@ -141,11 +186,12 @@ async def capture_tape(client: CoinGeckoClient, chain: str, p, cfg: SniperConfig
     return tape
 
 
-async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: SniperConfig, serial: dict[str, dict]) -> dict:
+async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: SniperConfig, serial: dict[str, dict], bouncer=None) -> dict:
     now = time.time()
     expired = store.expire_stale(chain, now - cfg.max_pending_age_min * 60)
     ready = store.pending(chain, now - cfg.window_s - cfg.lag_s)
-    counts = {"ready": len(ready), "captured": 0, "quiet": 0, "waiting": 0, "reanchored": 0, "truncated": 0, "empty": 0, "retry": 0, "expired": expired, "alerts": 0}
+    counts = {"ready": len(ready), "captured": 0, "quiet": 0, "waiting": 0, "reanchored": 0, "truncated": 0, "empty": 0, "retry": 0, "expired": expired, "alerts": 0,
+              "ENTER": 0, "WATCH": 0, "AVOID": 0}
     if not ready:
         return counts
 
@@ -160,14 +206,28 @@ async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: 
     except CoinGeckoError as exc:
         _log(f"{chain}: pools/multi failed ({exc}); capturing without the activity pre-filter")
 
+    if bouncer is not None:
+        bouncer.refresh_memory()  # before any capture of this sweep, so the memory never includes the launch being judged
+    supplies = store.supplies()
+    missing = sorted({(p["token"] or "").lower() for p in ready if p["token"] and (chain, (p["token"] or "").lower()) not in supplies})
+    try:
+        for token, supply in (await token_supplies(client, chain, missing)).items():
+            store.save_supply(chain, token, supply)
+            supplies[(chain, token)] = supply
+    except CreditBudgetExceeded:
+        raise
+    except CoinGeckoError as exc:
+        _log(f"{chain}: tokens/multi failed ({exc}); supply checks skipped this sweep")
+
     async def one(p):
-        act = activity.get(p["pool"])
+        snap = activity.get(p["pool"])
+        act = {**(snap or {}), "supply": supplies.get((chain, (p["token"] or "").lower()))}
         age_min = (now - p["created_ts"]) / 60
-        if act is not None and act["buys_h24"] < cfg.min_buys:
+        if snap is not None and snap["buys_h24"] < cfg.min_buys:
             if age_min < cfg.quiet_recheck_min:
                 counts["waiting"] += 1  # trading can open minutes after pool creation: look again next sweep
                 return
-            store.set_status(chain, p["pool"], "quiet", f"{act['buys_h24']} buys after {age_min:.0f} min")
+            store.set_status(chain, p["pool"], "quiet", f"{snap['buys_h24']} buys after {age_min:.0f} min")
             counts["quiet"] += 1
             return
         try:
@@ -177,6 +237,9 @@ async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: 
         except CoinGeckoError as exc:
             store.set_note(chain, p["pool"], f"retrying: {str(exc)[:160]}")  # stays pending; expire_stale bounds the retries
             counts["retry"] += 1
+            return
+        if tape.get("not_ready"):
+            counts["waiting"] += 1  # a late opener whose re-anchored window hasn't been indexed yet
             return
         if not tape["trades"]:
             if age_min < cfg.quiet_recheck_min:
@@ -190,7 +253,17 @@ async def capture_ready(client: CoinGeckoClient, store: Store, chain: str, cfg: 
         store.save_capture(chain, p["pool"], tape)
         counts["captured"] += 1
         if tape["truncated"]:
-            return  # no alerts from a tape whose end was cut off
+            return  # no alerts or verdicts from a tape whose end was cut off
+        if bouncer is not None:
+            try:
+                v = await bouncer.evaluate(client, chain, dict(p), tape, act)
+                counts[v.verdict] += 1
+                if v.verdict == "ENTER":
+                    _log(f"ENTER {chain} {p['name']}: passed {len(v.checks)} checks (stage {v.stage}) at ${v.features.get('price_usd') or 0:.8g}")
+            except CreditBudgetExceeded:
+                raise
+            except CoinGeckoError as exc:
+                _log(f"{chain} {p['name']}: checks failed ({str(exc)[:120]}), no verdict")
         hits = {}
         clean = analyze.drop_fee_legs([{**t, "chain": chain, "pool": p["pool"]} for t in tape["trades"]], cfg)
         for t in sorted(clean, key=lambda t: t["block"]):
@@ -272,6 +345,9 @@ def analysis_job(db_path, cfg: SniperConfig) -> dict:
         data = store.load_for_analysis(cfg.snipe_s, since=_since(cfg))
         counts = refresh_classes(store, cfg, data)
         pools, trades = analyze.prepare(data["pools"], data["trades"], cfg, since=data.get("since") or None)
+        stats = analyze.wallet_stats(trades, pools, cfg, info=data["info"])
+        store.save_packs(analyze.find_packs(trades, stats, cfg))  # the bouncer's memory of entity clusters
+        store.commit()
         serial = set(store.load_classes())
         touched = {(t["chain"], t["pool"]) for t in trades if t["wallet"] in serial}
         todo = [p for p in pools if (p["chain"], p["pool"]) in touched and (p["chain"], p["pool"]) not in data["info"]][:1000]
@@ -313,13 +389,14 @@ async def housekeeping(client: CoinGeckoClient, store: Store, cfg: SniperConfig,
     from .profile import enrich_launches
 
     fixed, still = await recapture_truncated(client, store, cfg)
+    supplied = await backfill_supply(client, store)
     job = await asyncio.to_thread(analysis_job, db_path, cfg)
     results, credits = await enrich_launches(job["todo"], client=client)
     for r in results:
         if "error" not in r:
             store.save_launch_info(r["chain"], r["pool"], r)
     store.commit()
-    return f"recaptured {fixed} truncated tapes ({still} still cut), classes {job['classes']}, enriched {len(results)} launches ({credits} credits), report rewritten"
+    return f"recaptured {fixed} truncated tapes ({still} still cut), supply for {supplied} tokens, classes {job['classes']}, enriched {len(results)} launches ({credits} credits), report rewritten"
 
 
 async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_credits: int | None = None):
@@ -329,6 +406,11 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
     `max_credits_per_day` the collector pauses until the next UTC day."""
     store = Store(db_path)
     deadline = time.time() + minutes * 60 if minutes else None
+    bouncer = None
+    if cfg.bouncer_enabled:
+        from .bouncer import Bouncer
+
+        bouncer = Bouncer(store, cfg)
     async with CoinGeckoClient() as client:
         if max_credits:
             client.max_credits = max_credits
@@ -356,8 +438,9 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
             for chain in cfg.chains:
                 try:
                     found = await discover(client, store, chain, cfg, deep=deep)
-                    c = await capture_ready(client, store, chain, cfg, serial)
+                    c = await capture_ready(client, store, chain, cfg, serial, bouncer)
                     snaps = await take_snapshots(client, store, chain, cfg)
+                    book = await bouncer.manage_positions(client, chain, pools_multi) if bouncer else {"open": 0, "closed": 0}
                 except CreditBudgetExceeded:
                     store.add_credits(day, client.credits_used - before)
                     store.commit()
@@ -376,7 +459,8 @@ async def run(cfg: SniperConfig, db_path, minutes: float | None = None, max_cred
                 _log(
                     f"{chain}: +{found['new']} new, +{found['secondary']} secondary{' (deep)' if deep else ''} | captured {c['captured']} "
                     f"(late open {c['reanchored']}, cut {c['truncated']}) waiting {c['waiting']} quiet {c['quiet']} empty {c['empty']} retry {c['retry']} "
-                    f"expired {c['expired']} | alerts {c['alerts']} | snapshots {snaps} | serial wallets {by_label} | "
+                    f"expired {c['expired']} | verdicts enter {c['ENTER']} watch {c['WATCH']} avoid {c['AVOID']} | paper open {book['open']} closed {book['closed']} | "
+                    f"alerts {c['alerts']} | snapshots {snaps} | serial wallets {by_label} | "
                     f"credits today {store.credits_on(day) + client.credits_used - before:,.0f} | sweep {time.time() - started:.0f}s"
                 )
             if time.time() - last_housekeeping >= cfg.housekeeping_every_min * 60:

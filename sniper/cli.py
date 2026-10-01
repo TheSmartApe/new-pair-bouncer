@@ -103,6 +103,20 @@ def cmd_money(args):
     print(money.fmt(summary))
 
 
+def cmd_backtest_bouncer(args):
+    import json as _json
+
+    from . import backtest_bouncer
+
+    cfg = _cfg(args)
+    store = Store(Path(args.db))
+    res = backtest_bouncer.run(store, cfg, fetch=not args.no_fetch)
+    print(backtest_bouncer.fmt(res))
+    if args.out:
+        Path(args.out).write_text(_json.dumps(res, default=str), encoding="utf-8")
+        print(f"rows -> {args.out}")
+
+
 def cmd_web(args):
     from . import web
 
@@ -140,6 +154,7 @@ def main(argv=None):
         ("report", cmd_report, "write the markdown report"),
         ("money", cmd_money, "what serial wallets put into their snipes and took out (CoinGecko wallet PnL), stored for the report and dashboard"),
         ("web", cmd_web, "live dashboard on http://localhost:8765 (read-only, run it next to the collector)"),
+        ("backtest-bouncer", cmd_backtest_bouncer, "walk-forward replay of the pre-entry checks over recorded launches, vs their +60m outcome"),
     )
     for name, fn, help_ in commands:
         p = sub.add_parser(name, help=help_)
@@ -154,6 +169,9 @@ def main(argv=None):
             p.add_argument("--out", default=None)
         if name == "web":
             p.add_argument("--port", type=int, default=8765)
+        if name == "backtest-bouncer":
+            p.add_argument("--out", default=None, help="write every launch's verdict and outcome to this JSON file")
+            p.add_argument("--no-fetch", action="store_true", help="don't fetch missing minute candles (1 API call per launch, cached)")
         p.set_defaults(fn=fn)
 
     args = ap.parse_args(argv)

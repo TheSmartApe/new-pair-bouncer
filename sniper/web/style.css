@@ -104,3 +104,14 @@ tr.fresh td { animation: fresh 2.4s ease-out; }
   .grid { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* bouncer */
+.title .sub { color: var(--faint); font-size: 13px; }
+.tag.enter { color: #0a0e0c; background: var(--green); }
+.tag.watch { color: var(--amber); background: rgba(242, 179, 61, 0.14); }
+.tag.avoid { color: var(--red); background: rgba(239, 91, 80, 0.14); }
+.feed td.why { max-width: 420px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+tr.row-enter td { background: rgba(141, 198, 63, 0.05); }
+.vs { color: var(--faint); font-size: 16px; font-weight: 500; }
+.books .foot { margin-top: 10px; }
+.bt .facts li { font-size: 13px; }

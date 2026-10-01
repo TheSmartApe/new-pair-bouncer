@@ -13,13 +13,59 @@ from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import analyze
+from . import analyze, backtest_bouncer, bouncer
 from .config import ROOT, SniperConfig
 
 STATIC = Path(__file__).resolve().parent / "web"
 BRAND = ROOT / "core" / "brand"
 FEED_ROWS = 30
 BOTS = {"round_tripper"}  # the "round-trip bots" everywhere on the dashboard, matching the report
+
+
+class _ReadOnlyStore:
+    """The few Store reads the backtest needs, over a read-only connection (the web process never writes)."""
+
+    def __init__(self, db):
+        self.db = db
+
+    def all_pools(self):
+        return [dict(r) for r in self.db.execute("SELECT * FROM pools")]
+
+    def all_trades(self):
+        return [dict(r) for r in self.db.execute("SELECT * FROM trades")]
+
+    def all_snapshots(self):
+        return [dict(r) for r in self.db.execute("SELECT * FROM snapshots")]
+
+    def launch_info(self):
+        return {(r["chain"], r["pool"]): dict(r) for r in self.db.execute("SELECT * FROM launch_info")}
+
+    def supplies(self):
+        from .store import Store
+
+        return Store.supplies(self)
+
+    def candles(self):
+        from .store import Store
+
+        return Store.candles(self)
+
+    def candles_fetched(self):
+        from .store import Store
+
+        return Store.candles_fetched(self)
+
+    def deployers(self, creation_block_s: int = 2):
+        from .store import Store
+
+        return Store.deployers(self, creation_block_s)
+
+
+def _reason(checks: list[dict]) -> list[str]:
+    """The checks worth showing for a verdict: failures first, then warnings."""
+    fails = [c["reason"] for c in checks if c["status"] == "fail"]
+    warns = [c["reason"] for c in checks if c["status"] == "warn"]
+    return (fails or warns)[:2]
 
 
 class State:
@@ -32,6 +78,8 @@ class State:
         self.slow_ttl = slow_ttl
         self._slow: dict = {}
         self._slow_ts = 0.0
+        self._backtest: dict = {}
+        self._backtest_ts = 0.0
         self._lock = threading.Lock()
 
     def _db(self):
@@ -119,6 +167,55 @@ class State:
             "classes": dict(counts),
         }
 
+    def _verdicts(self, db) -> dict:
+        rows = [dict(r) for r in db.execute(
+            """SELECT v.chain, v.pool, v.decided_ts, v.verdict, v.stage, v.price_usd, v.reserve_usd, v.checks_json, p.name, p.dex, p.created_ts
+               FROM verdicts v JOIN pools p ON p.chain=v.chain AND p.pool=v.pool ORDER BY v.decided_ts DESC LIMIT ?""",
+            (FEED_ROWS,),
+        )]
+        feed = []
+        for r in rows:
+            d = json.loads(r["checks_json"])
+            checks = d.get("checks", [])
+            vals = {c["key"]: c.get("value") for c in checks}
+            feed.append({
+                "pool": r["pool"], "name": r["name"], "dex": r["dex"], "decided_ts": r["decided_ts"], "created_ts": r["created_ts"],
+                "verdict": r["verdict"], "stage": r["stage"], "price_usd": r["price_usd"], "reserve_usd": r["reserve_usd"],
+                "reasons": _reason(checks), "passed": sum(1 for c in checks if c["status"] == "pass"), "checks": len(checks),
+                "buyers": vals.get("buyers"), "bots": vals.get("known_bots"), "cluster": vals.get("entity_cluster"),
+                "wash": vals.get("wash_trading"), "top3": vals.get("buy_concentration"),
+            })
+        since = time.time() - 86400
+        counts = {k: v for k, v in db.execute("SELECT verdict, COUNT(*) FROM verdicts WHERE decided_ts>=? GROUP BY verdict", (since,))}
+        clusters = []
+        for r in db.execute(
+            """SELECT v.decided_ts, v.checks_json, p.name FROM verdicts v JOIN pools p ON p.chain=v.chain AND p.pool=v.pool
+               WHERE v.verdict='AVOID' ORDER BY v.decided_ts DESC LIMIT 200"""
+        ):
+            for c in json.loads(r["checks_json"]).get("checks", []):
+                if c["key"] in ("entity_cluster", "known_bots") and c["status"] == "fail":
+                    clusters.append({"ts": r["decided_ts"], "name": r["name"], "reason": c["reason"]})
+                    break
+            if len(clusters) >= 8:
+                break
+        b = self.cfg.bouncer_config()
+        paper = [dict(r) for r in db.execute("SELECT * FROM paper")]
+        return {
+            "feed": feed,
+            "counts_24h": counts,
+            "cluster_alerts": clusters,
+            "books": {name: bouncer.book_stats(paper, name, b) for name in ("bouncer", "crowd", "control")},
+            "rules": {"min_buyers": b.min_buyers, "max_top3": b.max_top3_buy_share, "max_bots": b.max_bot_buyer_share,
+                      "position_usd": b.position_usd, "take_profit_pct": b.take_profit_pct, "stop_loss_pct": b.stop_loss_pct, "max_hold_min": b.max_hold_min},
+        }
+
+    def _backtest_part(self, db) -> dict:
+        res = backtest_bouncer.run(_ReadOnlyStore(db), self.cfg)
+        if not res.get("launches"):
+            return {}
+        res.pop("rows", None)
+        return res
+
     def build(self) -> dict:
         db = self._db()
         try:
@@ -129,6 +226,13 @@ class State:
                     self._slow = self._slow_part(db, classes)
                     self._slow_ts = now
                 slow = dict(self._slow)
+                if now - self._backtest_ts > 600:  # the walk-forward replay takes a few seconds: every 10 min
+                    try:
+                        self._backtest = self._backtest_part(db)
+                    except Exception as exc:  # noqa: BLE001 - the live view must not die on a replay error
+                        self._backtest = {"error": str(exc)[:200]}
+                    self._backtest_ts = now
+                backtest = dict(self._backtest)
             day = time.strftime("%Y-%m-%d", time.gmtime(now))
             credits = db.execute("SELECT v FROM meta WHERE k=?", (f"credits:{day}",)).fetchone()
             first, last_seen, pools_seen = db.execute("SELECT MIN(created_ts), MAX(seen_ts), COUNT(*) FROM pools").fetchone()
@@ -150,6 +254,8 @@ class State:
                 "feed": self._feed(db, classes),
                 "alerts": self._alerts(db),
                 "money": json.loads(money[0]) if money else None,
+                "bouncer": self._verdicts(db),
+                "backtest": backtest,
             }
         finally:
             db.close()

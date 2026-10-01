@@ -76,6 +76,7 @@ def pool_snapshot(pool_row: dict) -> dict:
         "trades_h1": count("h1"),
         "trades_m30": count("m30"),
         "trades_m15": count("m15"),
+        "trades_m5": count("m5"),
         "volume_h1": _f((a.get("volume_usd") or {}).get("h1")),
         "buys_h24": (((a.get("transactions") or {}).get("h24")) or {}).get("buys") or 0,
     }

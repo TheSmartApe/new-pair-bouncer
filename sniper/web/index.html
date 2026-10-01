@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Serial Sniper Tracker</title>
+  <title>New Pair Bouncer</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -12,8 +12,9 @@
       <img src="/brand/coingecko-api-on-dark.svg" alt="Data powered by CoinGecko API">
     </a>
     <div class="title">
-      <h1>Serial Sniper Tracker</h1>
+      <h1>New Pair Bouncer</h1>
       <span class="pill chain" id="chain">Robinhood Chain</span>
+      <span class="sub">checks every new pair before a bot buys it</span>
     </div>
     <div class="status">
       <span class="dot" id="dot"></span>
@@ -24,64 +25,50 @@
   </header>
 
   <section class="kpis">
-    <div class="kpi"><div class="k-label">Launches recorded</div><div class="k-value" id="k-launches">–</div><div class="k-sub" id="k-launches-sub">first 2 minutes of every new pool</div></div>
-    <div class="kpi"><div class="k-label">Had a serial sniper in the first <span id="snipe-s">10</span>s</div><div class="k-value amber" id="k-sniper">–</div><div class="k-sub">launches, last 24h</div></div>
-    <div class="kpi"><div class="k-label">Had round-trip bots in the buyer list</div><div class="k-value red" id="k-bots">–</div><div class="k-sub">launches, last 24h</div></div>
-    <div class="kpi"><div class="k-label">Repeat wallets identified</div><div class="k-value" id="k-wallets">–</div><div class="k-sub" id="k-wallets-sub">–</div></div>
+    <div class="kpi"><div class="k-label">New pairs checked</div><div class="k-value" id="k-checked">–</div><div class="k-sub" id="k-checked-sub">last 24h</div></div>
+    <div class="kpi"><div class="k-label">Let in</div><div class="k-value green" id="k-enter">–</div><div class="k-sub" id="k-enter-sub">–</div></div>
+    <div class="kpi"><div class="k-label">Paper, bouncer vs buy everything</div><div class="k-value" id="k-books">–</div><div class="k-sub" id="k-books-sub">$100 per pair, live</div></div>
+    <div class="kpi"><div class="k-label">Backtest, 1h after entry</div><div class="k-value" id="k-bt">–</div><div class="k-sub" id="k-bt-sub">–</div></div>
   </section>
 
   <main class="grid">
     <section class="card feed">
       <div class="card-head">
-        <h2>Live launches</h2>
-        <span class="hint">who bought in the first seconds</span>
+        <h2>Live verdicts</h2>
+        <span class="hint">each new pair, ~4 minutes after launch</span>
       </div>
       <table>
         <thead>
-          <tr><th>Time</th><th>Token</th><th class="num">Buyers</th><th class="num">First 10s</th><th>Serial snipers</th><th>Round-trip bots</th><th class="num">Sniped</th></tr>
+          <tr><th>Time</th><th>Pair</th><th>Verdict</th><th>Why</th><th class="num">Buyers</th><th class="num">Top 3</th><th class="num">Bots</th></tr>
         </thead>
         <tbody id="feed"></tbody>
       </table>
     </section>
 
     <aside class="side">
-      <section class="card money" id="money">
-        <div class="card-head"><h2>Serial snipers: where the money went</h2></div>
-        <div class="flow">
-          <div><div class="f-label">put in</div><div class="f-value" id="m-in">–</div></div>
-          <div class="arrow">→</div>
-          <div><div class="f-label">took out</div><div class="f-value" id="m-out">–</div></div>
-          <div class="net"><div class="f-label">net</div><div class="f-value" id="m-net">–</div></div>
-        </div>
-        <div class="split">
-          <div class="bar"><div class="win" id="m-winbar"></div><div class="lose" id="m-losebar"></div></div>
-          <div class="split-legend"><span class="green" id="m-win">–</span><span class="red" id="m-lose">–</span></div>
-        </div>
-        <ul class="facts">
-          <li id="m-speed">–</li>
-          <li id="m-positions">–</li>
-          <li id="m-best">–</li>
-        </ul>
-        <div class="foot" id="m-foot">cash in vs cash out on the tokens they sniped · CoinGecko wallet PnL</div>
+      <section class="card books">
+        <div class="card-head"><h2>Paper books</h2><span class="hint" id="rules">–</span></div>
+        <table>
+          <thead><tr><th>Book</th><th class="num">Pairs</th><th class="num">Open</th><th class="num">Win rate</th><th class="num">PnL</th><th class="num">Return</th></tr></thead>
+          <tbody id="books"></tbody>
+        </table>
+        <div class="foot">bouncer = buys only ENTER · control = buys every pair it checked · same exits, slippage from pool liquidity, fees</div>
       </section>
 
-      <section class="card leaders">
-        <div class="card-head"><h2>Top snipers by cash made</h2></div>
-        <table>
-          <thead><tr><th>Wallet</th><th class="num">Launches</th><th class="num">Entry</th><th class="num">Cash</th></tr></thead>
-          <tbody id="leaders"></tbody>
-        </table>
+      <section class="card bt">
+        <div class="card-head"><h2>Backtest</h2><span class="hint">walk-forward, every recorded launch</span></div>
+        <ul class="facts" id="bt"></ul>
       </section>
 
       <section class="card alerts">
-        <div class="card-head"><h2>Live alerts</h2><span class="hint">a known sniper just hit a new launch</span></div>
+        <div class="card-head"><h2>Cluster alerts</h2><span class="hint">coordinated wallets caught at the door</span></div>
         <ul id="alerts"></ul>
       </section>
     </aside>
   </main>
 
   <footer class="foot-bar">
-    <span>Data: CoinGecko API (new pools, trades, pool snapshots, wallet PnL). Snipers, bots and packs are labels computed by this repo, not CoinGecko fields. Research, not trading advice.</span>
+    <span>Data: CoinGecko API (new pools, trades, token info, wallet PnL, pool prices). Checks, clusters and verdicts are computed by this repo, not CoinGecko fields. Paper trading only, not trading advice.</span>
     <span class="links">
       <a href="https://github.com/TheSmartApe/serial-sniper-tracker" target="_blank" rel="noopener">GitHub</a>
       <a href="https://docs.coingecko.com?utm_source=dashboard&utm_content=the_smart_ape" target="_blank" rel="noopener">Docs</a>
