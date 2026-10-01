@@ -1,5 +1,5 @@
 @echo off
-rem Serial Sniper Tracker supervisor: runs the collector and restarts it if it ever exits.
+rem New Pair Bouncer supervisor: runs the collector (and the bouncer) and restarts it if it ever exits.
 rem Credits are capped per UTC day in the database (max_credits_per_day in sniper.yaml); past the cap the collector pauses until the next day.
 rem Start it hidden with scripts\start.ps1, stop it with scripts\stop.ps1. Log: data\collect.log
 cd /d "%~dp0.."

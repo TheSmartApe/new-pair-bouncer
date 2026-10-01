@@ -96,7 +96,14 @@ Run it unattended so the paper books build a track record:
 # Windows: a hidden supervisor that restarts the collector if it ever exits
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 powershell -ExecutionPolicy Bypass -File scripts/stop.ps1
+
+# start it again automatically every time you log in (no admin rights needed)
+powershell -ExecutionPolicy Bypass -File scripts/install-autostart.ps1
+powershell -ExecutionPolicy Bypass -File scripts/uninstall-autostart.ps1
 ```
+
+The bot only runs while the machine is awake: if it sleeps, collection pauses and picks up again
+when it wakes.
 
 ```sh
 # macOS/Linux

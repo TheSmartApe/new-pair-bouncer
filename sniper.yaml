@@ -1,4 +1,4 @@
-# Serial Sniper Tracker settings. Every key is optional; defaults live in sniper/config.py.
+# New Pair Bouncer settings. Every key is optional; defaults live in sniper/config.py and sniper/checks.py (bouncer section).
 # Collection keys change what gets recorded. Analysis keys (snipe_s, min_launches, pack_*) can be
 # changed any time and re-applied to the same recorded data with `python -m sniper report`.
 chains: [robinhood]

@@ -135,7 +135,7 @@ def cmd_report(args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="python -m sniper", description="Serial Sniper Tracker on CoinGecko API data")
+    ap = argparse.ArgumentParser(prog="python -m sniper", description="New Pair Bouncer: pre-entry checks for new pairs, on CoinGecko API data")
     ap.add_argument("--db", default=str(DB_PATH))
     ap.add_argument("--config", default=None, help="path to a sniper.yaml (default: repo root)")
     sub = ap.add_subparsers(dest="cmd", required=True)

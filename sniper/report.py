@@ -101,7 +101,7 @@ def build(store, cfg: SniperConfig, top: int = 20, handle: str | None = None, da
     first_age = cfg.snapshot_ages_min[0] if cfg.snapshot_ages_min else None
 
     L: list[str] = []
-    L.append("# Serial Sniper Tracker report")
+    L.append("# New Pair Bouncer: launch report")
     L.append("")
     span = ""
     if pools:
@@ -276,7 +276,7 @@ def build(store, cfg: SniperConfig, top: int = 20, handle: str | None = None, da
     L.append("- Pricing: https://www.coingecko.com/en/api/pricing")
     L.append("- Docs: https://docs.coingecko.com")
     L.append("")
-    text = links.rewrite_text("\n".join(L), handle or cfg.handle or "serial-sniper-tracker")
+    text = links.rewrite_text("\n".join(L), handle or cfg.handle or "new-pair-bouncer")
     summary = {
         "pools": len(all_pools),
         "launches": len(pools),

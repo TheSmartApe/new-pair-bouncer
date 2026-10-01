@@ -1,1 +1,1 @@
-"""Serial Sniper Tracker: which wallets keep sniping new launches, and what happens to those launches."""
+"""New Pair Bouncer: checks every new pair before a bot buys it, and records the launches it learns from."""

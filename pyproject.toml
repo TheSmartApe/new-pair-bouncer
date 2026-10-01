@@ -1,5 +1,5 @@
 [project]
-name = "serial-sniper-tracker"
+name = "new-pair-bouncer"
 version = "0.1.0"
 description = "Tracks the wallets that snipe every new launch on Robinhood Chain, the bots that round-trip them, and what happens to those launches. Built on CoinGecko API data; ships the onchain-signal-bot starter it was forked from."
 requires-python = ">=3.12"
